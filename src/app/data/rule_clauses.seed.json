@@ -1,0 +1,10 @@
+[
+  {"rule_id":"NRV-","standard":"GB 28050","edition":"2025","clause_id":null,"verified":false,"source_note":"待对照标准原文核验"},
+  {"rule_id":"ENERGY-","standard":"GB 28050","edition":"2025","clause_id":null,"verified":false,"source_note":"待对照标准原文核验"},
+  {"rule_id":"ACTUAL-","standard":"GB 28050","edition":"2025","clause_id":null,"verified":false,"source_note":"原型引用6.7表2，尚未经人工对照，禁止展示条款号"},
+  {"rule_id":"CLAIM-","standard":"GB 28050","edition":"2025","clause_id":null,"verified":false,"source_note":"待核验"},
+  {"rule_id":"PACKAGE-","standard":"GB 7718","edition":"2025","clause_id":null,"verified":false,"source_note":"仅有无检查；待核验"},
+  {"rule_id":"INGREDIENT-","standard":"GB 7718","edition":"2025","clause_id":null,"verified":false,"source_note":"需提供配方占比；待核验"},
+  {"rule_id":"ALLERGEN-","standard":"GB 7718","edition":"2025","clause_id":null,"verified":false,"source_note":"仅筛查；待核验"},
+  {"rule_id":"COURSE-100G-001","standard":"课程/内部要求","edition":"","clause_id":null,"verified":false,"source_note":"非国标条款"}
+]

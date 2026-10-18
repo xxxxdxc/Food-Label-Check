@@ -46,8 +46,8 @@ def test_contract_routes_and_review_payload():
         assert login.status_code == 200
         unavailable = client.get("/api/standards")
         invalid = client.get("/api/audits?limit=0")
-    assert unavailable.status_code == 501
-    assert unavailable.json()["error"]["code"] == "NOT_IMPLEMENTED"
+    assert unavailable.status_code == 200
+    assert unavailable.json()[0]["mode"] == "gb28050_2025_precheck"
     assert invalid.status_code == 422
     assert invalid.json()["error"]["code"] == "VALIDATION_ERROR"
 

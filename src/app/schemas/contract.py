@@ -30,6 +30,7 @@ class TaskError(BaseModel):
 class ErrorBody(BaseModel):
     code: str
     message: str
+    review_pending: int | None = None
 
 
 class ErrorResponse(BaseModel):
@@ -133,7 +134,13 @@ class StandardOption(BaseModel):
     coverage: str
 
 
-class SampleSummary(BaseModel):
+class SampleAttribution(BaseModel):
+    source_url: str
+    image_url: str
+    license: str
+
+
+class SampleSummary(SampleAttribution):
     id: str
     label: str
     description: str
@@ -173,6 +180,11 @@ class ReviewItemsResponse(BaseModel):
     document_version: int = Field(ge=0)
     items: list[ReviewItem]
     table_items: list[TableReviewItem]
+    document_id: str
+    product_id: str | None
+    images: list[dict[str, Any]]
+    threshold: float = 0.96
+    ocr_fields: list[AuditField] = Field(default_factory=list)
 
 
 class FieldDecision(BaseModel):
@@ -208,6 +220,29 @@ class CorrectionsRequest(BaseModel):
     reviewed_at: datetime | None = Field(default=None, alias="reviewedAt")
     decisions: list[FieldDecision]
     table_decisions: list[TableDecision] = Field(default_factory=list, alias="tableDecisions")
+    table_checked_all: bool = False
+    manual_tables: list[ManualTable] = Field(default_factory=list)
+
+
+class ManualRow(BaseModel):
+    nutrient: str = Field(min_length=1, max_length=100)
+    amount: str = Field(pattern=r"^\d+(?:\.\d+)?$")
+    unit: str = Field(min_length=1, max_length=20)
+    nrv_percent: str | None = Field(default=None, pattern=r"^\d+(?:\.\d+)?$")
+
+
+class ManualTable(BaseModel):
+    table_id: str = Field(min_length=1, max_length=100)
+    original_code: str
+    source_evidence_refs: list[str]
+    basis: Literal["per_100g", "per_100ml", "per_serving"]
+    basis_raw: str = Field(min_length=1, max_length=200)
+    serving_g: str | None = Field(default=None, pattern=r"^\d+(?:\.\d+)?$")
+    box_px: BoxPx | None = None
+    rows: list[ManualRow] = Field(min_length=1, max_length=100)
+
+
+CorrectionsRequest.model_rebuild()
 
 
 class JobReceipt(BaseModel):
@@ -230,3 +265,5 @@ class AuditReport(BaseModel):
     issues: list[AuditIssue]
     unchecked: list[AuditIssue]
     confirmed_fields: list[str]
+    corrections: list[dict[str, Any]] = Field(default_factory=list)
+    sample_attribution: SampleAttribution | None = None
