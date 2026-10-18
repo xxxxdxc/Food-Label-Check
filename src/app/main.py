@@ -1,13 +1,22 @@
-import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.api.contract import public_router, router
+from app.config import get_settings
+from app.errors import AppError
 from app.schemas.contract import HealthResponse
 
-app = FastAPI(title="Food-Label-Check")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    get_settings()
+    yield
+
+
+app = FastAPI(title="Food-Label-Check", lifespan=lifespan)
 app.include_router(public_router)
 app.include_router(router)
 
@@ -17,6 +26,14 @@ async def validation_error(_request: Request, _exc: RequestValidationError) -> J
     return JSONResponse(
         status_code=422,
         content={"error": {"code": "VALIDATION_ERROR", "message": "请求参数无效"}},
+    )
+
+
+@app.exception_handler(AppError)
+async def app_error(_request: Request, exc: AppError) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"code": exc.code, "message": str(exc.detail)}},
     )
 
 
@@ -30,7 +47,8 @@ async def http_error(_request: Request, exc: HTTPException) -> JSONResponse:
 
 @app.get("/api/health", response_model=HealthResponse)
 def health() -> HealthResponse:
+    settings = get_settings()
     return HealthResponse(
         status="ok",
-        ocr_configured=bool(os.getenv("BAIDU_API_KEY") and os.getenv("BAIDU_SECRET_KEY")),
+        ocr_configured=settings.ocr_configured,
     )

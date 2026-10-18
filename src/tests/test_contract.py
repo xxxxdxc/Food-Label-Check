@@ -42,9 +42,32 @@ def test_contract_routes_and_review_payload():
     assert manual.box_px is None
 
     with TestClient(app) as client:
+        login = client.post("/api/auth/login", json={"passcode": "test-passcode"})
+        assert login.status_code == 200
         unavailable = client.get("/api/standards")
         invalid = client.get("/api/audits?limit=0")
     assert unavailable.status_code == 501
     assert unavailable.json()["error"]["code"] == "NOT_IMPLEMENTED"
     assert invalid.status_code == 422
     assert invalid.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_business_routes_require_a_valid_session():
+    with TestClient(app) as client:
+        audits = client.get("/api/audits")
+        audit_file = client.get("/api/audits/x/files/y")
+        health = client.get("/api/health")
+
+    assert audits.status_code == 401
+    assert audits.json()["error"]["code"] == "UNAUTHORIZED"
+    assert audit_file.status_code == 401
+    assert audit_file.json()["error"]["code"] == "UNAUTHORIZED"
+    assert health.status_code == 200
+
+
+def test_login_rejects_an_invalid_passcode_with_business_error_code():
+    with TestClient(app) as client:
+        response = client.post("/api/auth/login", json={"passcode": "wrong"})
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "INVALID_CREDENTIALS"

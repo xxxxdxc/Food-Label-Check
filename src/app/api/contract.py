@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import time
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from fastapi.security import APIKeyCookie
 
+from app.config import Settings, get_settings
+from app.errors import AppError
 from app.schemas.contract import (
     AuditIssue,
     AuditList,
@@ -27,12 +32,39 @@ from app.schemas.contract import (
 
 
 session_cookie = APIKeyCookie(name="session", auto_error=False)
+SESSION_TTL_SECONDS = 12 * 60 * 60
+
+
+def make_session(settings: Settings) -> str:
+    expires = str(int(time.time()) + SESSION_TTL_SECONDS)
+    signature = hmac.new(
+        settings.session_secret.encode(), expires.encode(), hashlib.sha256,
+    ).hexdigest()
+    return f"{expires}.{signature}"
+
+
+def require_session(
+    token: str | None = Depends(session_cookie),
+    settings: Settings = Depends(get_settings),
+) -> None:
+    try:
+        expires, signature = (token or "").split(".", 1)
+        expected = hmac.new(
+            settings.session_secret.encode(), expires.encode(), hashlib.sha256,
+        ).hexdigest()
+        valid = int(expires) >= time.time() and hmac.compare_digest(signature, expected)
+    except ValueError:
+        valid = False
+    if not valid:
+        raise AppError(401, "UNAUTHORIZED", "请先登录")
+
+
 public_router = APIRouter(
-    prefix="/api", responses={422: {"model": ErrorResponse}, 501: {"model": ErrorResponse}},
+    prefix="/api", responses={422: {"model": ErrorResponse}},
 )
 router = APIRouter(
     prefix="/api",
-    dependencies=[Depends(session_cookie)],
+    dependencies=[Depends(require_session)],
     responses={
         code: {"model": ErrorResponse}
         for code in (401, 404, 409, 413, 415, 422, 429, 501)
@@ -40,16 +72,34 @@ router = APIRouter(
 )
 
 
-def unavailable() -> JSONResponse:
-    return JSONResponse(
-        status_code=501,
-        content={"error": {"code": "NOT_IMPLEMENTED", "message": "接口正在开发中"}},
+def unavailable() -> None:
+    raise AppError(501, "NOT_IMPLEMENTED", "接口正在开发中")
+
+
+@public_router.post(
+    "/auth/login",
+    response_model=LoginResponse,
+    responses={401: {"model": ErrorResponse}},
+)
+def login(
+    body: LoginRequest,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    if not hmac.compare_digest(body.passcode, settings.access_passcode):
+        raise AppError(401, "INVALID_CREDENTIALS", "口令无效")
+
+    response = JSONResponse(content={"authenticated": True})
+    response.set_cookie(
+        "session",
+        make_session(settings),
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        secure=request.url.scheme == "https",
+        samesite="lax",
+        path="/",
     )
-
-
-@public_router.post("/auth/login", response_model=LoginResponse)
-def login(body: LoginRequest) -> Response:
-    return unavailable()
+    return response
 
 
 @router.get("/standards", response_model=list[StandardOption])
