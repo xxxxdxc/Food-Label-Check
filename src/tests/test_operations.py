@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import select
 from app.config import get_settings
 from app.db import Document, Job, Task, init_db
-from app.engine_bridge import checker_input
+from app.engine_bridge import checker_input, packaging_findings
 from app.errors import AppError
 from app.services.ocr_client import reserve_usage
 from app.services.samples import bind_document
@@ -100,3 +100,13 @@ def test_bridge_does_not_claim_complete_table_and_preserves_confidence():
     payload, _ = checker_input(synthetic_document(False), "0")
     assert payload["nutrition_complete"] is False
     assert payload["nutrients"]["protein"]["confidence"] is not None
+
+
+def test_cross_position_content_compares_decimal_values_in_common_units():
+    doc = synthetic_document(False)
+    for identifier, text in (("net-a", "净含量 1kg"), ("net-b", "净含量 1000.0g")):
+        doc["evidence"].append({"id": identifier, "imageId": "front", "sourceType": "baidu_accurate",
+            "text": text, "boxPx": {"left": 0, "top": 0, "width": 10, "height": 10}, "ocrConfidence": .99})
+    cross = next(i for i in packaging_findings(doc) if i["rule_id"] == "CROSS-NET_CONTENT")
+    assert cross["status"] == "PASS"
+    assert len(cross["evidence"]) == 2

@@ -92,7 +92,7 @@ Copy-Item .env.example .env
 
 path-guard 只允许后端 PR 修改 `src/`。`shared/openapi.json` 由负责人生成并推到 main，本分支不提交它；本地契约请导出到被忽略的 `src/data/openapi.json`。`app/data/rule_clauses.seed.json` 是源码种子，提交时须对这一文件单独 `git add -f`，其余 `data/` 文件均不提交。
 
-删除单个任务前停止 API/Worker 并备份 DATA_DIR。脚本默认只预览；明确指定同一个 UUID 才删除该任务库记录、净化图片和原始 OCR 响应，其他任务不受影响。运行中的任务拒绝删除；停止 Worker 后应先恢复超过 5 分钟的锁再删除。
+删除单个任务前停止 API/Worker 并备份 DATA_DIR。脚本默认只预览；明确指定同一个 UUID 才删除该任务库记录、净化图片和原始 OCR 响应，其他任务不受影响。运行中的任务拒绝删除；停止 Worker 并等待锁超过 5 分钟后，可用 `python -c "from app.worker import recover_jobs; recover_jobs()"` 恢复锁再删除。
 
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.delete_audit <任务UUID>

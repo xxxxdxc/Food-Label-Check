@@ -163,7 +163,7 @@ def packaging_findings(document):
             values.append((str(value), unit, e))
     if len(values) > 1:
         uncertain = any(v[2].get("ocrConfidence") is None or v[2]["ocrConfidence"] < .96 for v in values)
-        unequal = len({(v[0], v[1]) for v in values}) > 1
+        unequal = len({(Decimal(v[0]), v[1]) for v in values}) > 1
         output.append(finding("L1", "REVIEW" if uncertain else "FAIL" if unequal else "PASS",
                               "CROSS-NET_CONTENT", "跨位置净含量" + ("存在差异，需核对" if unequal else "一致"),
                               "cross_position", [{"source_refs": [v[2]["id"]]} for v in values],
