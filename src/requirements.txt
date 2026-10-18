@@ -1,0 +1,9 @@
+# 版本在首次安装后用 pip freeze 锁定，不使用开放区间
+fastapi
+uvicorn
+pydantic
+pydantic-settings
+sqlalchemy
+python-multipart
+Pillow
+pytest

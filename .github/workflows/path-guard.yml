@@ -1,0 +1,25 @@
+name: path-guard
+on:
+  pull_request:
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Backend contributor may only change src/
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$AUTHOR" != "nineABC" ]; then exit 0; fi
+          files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename, (.[].previous_filename // empty)')
+          bad=$(printf '%s\n' "$files" | grep -v '^src/' | grep -v '^$' || true)
+          if [ -n "$bad" ]; then
+            echo "nineABC 只能修改 src/ 下的文件，以下路径越界："
+            echo "$bad"
+            exit 1
+          fi

@@ -1,0 +1,4 @@
+# 默认所有路径由项目负责人审核
+*                @xxxxdxc
+# 后端目录：后端开发者也需审核
+/src/            @xxxxdxc @nineABC
