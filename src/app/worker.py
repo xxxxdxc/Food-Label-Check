@@ -173,7 +173,7 @@ def run_one(client=None):
             db.commit()
     except Exception as exc:
         error = exc if isinstance(exc, ServiceError) else ServiceError("WORKER_ERROR", "处理失败，请检查 Worker 日志", True)
-        log.error("job %s failed: %s", job_id, type(exc).__name__)
+        log.error("job %s failed: %s code=%s message=%s", job_id, type(exc).__name__, error.code, error.message)
         with init_db()() as db:
             begin_write(db)
             job = db.get(Job, job_id)

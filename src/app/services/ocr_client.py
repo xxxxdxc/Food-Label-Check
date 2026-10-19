@@ -3,6 +3,7 @@ import base64
 import json
 import socket
 import time
+from threading import Lock
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -43,6 +44,21 @@ def reserve_usage(service, limit):
         db.commit()
 
 
+# All client instances in the single Worker share the same conservative pace.
+# Keep below the free tier's 2 QPS even when several crops finish quickly.
+_OCR_REQUEST_LOCK = Lock()
+_next_ocr_request_at = 0.0
+
+
+def pace_ocr_request():
+    global _next_ocr_request_at
+    with _OCR_REQUEST_LOCK:
+        now = time.monotonic()
+        if now < _next_ocr_request_at:
+            time.sleep(_next_ocr_request_at - now)
+        _next_ocr_request_at = time.monotonic() + 1.05
+
+
 class BaiduClient:
     def __init__(self):
         self.token = None
@@ -58,8 +74,8 @@ class BaiduClient:
                 raise ServiceError("OCR_RESPONSE", "OCR 响应超过大小限制", True)
             result = json.loads(raw)
         except HTTPError as exc:
-            code = "OCR_AUTH" if exc.code in {401, 403} else "OCR_QUOTA" if exc.code == 429 else "OCR_NETWORK"
-            raise ServiceError(code, "OCR 服务 HTTP 错误 " + str(exc.code), exc.code >= 500) from None
+            code = "OCR_AUTH" if exc.code in {401, 403} else "OCR_RATE_LIMIT" if exc.code == 429 else "OCR_NETWORK"
+            raise ServiceError(code, "OCR 服务 HTTP 错误 " + str(exc.code), exc.code == 429 or exc.code >= 500) from None
         except (TimeoutError, socket.timeout):
             raise ServiceError("OCR_TIMEOUT", "OCR 请求超时", True) from None
         except URLError as exc:
@@ -71,8 +87,12 @@ class BaiduClient:
             raise ServiceError("OCR_RESPONSE", "OCR 返回格式无效", True)
         error = result.get("error_code")
         if error or result.get("error"):
-            if error in {17, 18, 19}:
-                raise ServiceError("OCR_QUOTA", "百度 OCR 额度或调用频率达到限制")
+            if error == 18:
+                raise ServiceError("OCR_RATE_LIMIT", "百度 OCR 调用过快（错误码 18，QPS 超限），请稍后重试", True)
+            if error == 17:
+                raise ServiceError("OCR_QUOTA", "百度 OCR 当日调用额度已用尽（错误码 17），请核对该接口的每日额度")
+            if error == 19:
+                raise ServiceError("OCR_QUOTA", "百度 OCR 总调用额度已用尽（错误码 19），请核对该接口的资源包")
             if error in {110, 111} or result.get("error") in {"invalid_client", "invalid_grant"}:
                 self.token = None
                 raise ServiceError("OCR_AUTH", "百度 OCR 认证失败，请检查密钥")
@@ -95,7 +115,6 @@ class BaiduClient:
 
     def recognize(self, data, kind):
         token = self.access_token()
-        reserve_usage("ocr", get_settings().daily_ocr_limit)
         params = {"image": base64.b64encode(data).decode("ascii")}
         if kind == "accurate":
             params.update(language_type="CHN_ENG", probability="true")
@@ -103,7 +122,18 @@ class BaiduClient:
             params.update(cell_contents="true", return_excel="false")
         else:
             raise ValueError("Unknown OCR kind")
-        result = self.post("https://aip.baidubce.com/rest/2.0/ocr/v1/" + kind + "?access_token=" + token, params)
+        for attempt in range(4):
+            pace_ocr_request()
+            # Count every attempted provider call, including retries.
+            reserve_usage("ocr", get_settings().daily_ocr_limit)
+            try:
+                result = self.post("https://aip.baidubce.com/rest/2.0/ocr/v1/" + kind + "?access_token=" + token, params)
+                break
+            except ServiceError as exc:
+                if exc.code != "OCR_RATE_LIMIT" or attempt == 3:
+                    raise
+                time.sleep(2 ** attempt)
+
         if kind == "accurate" and not isinstance(result.get("words_result"), list):
             raise ServiceError("OCR_RESPONSE", "高精度 OCR 响应缺少文本行", True)
         if kind == "table":
