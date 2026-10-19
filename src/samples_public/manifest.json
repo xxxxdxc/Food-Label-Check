@@ -1,0 +1,23 @@
+[
+  {
+    "code": "4260290260010",
+    "productName": "纯牛奶",
+    "productUrl": "https://world.openfoodfacts.org/product/4260290260010",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/426/029/026/0010/nutrition_zh.13.full.jpg",
+    "license": "CC BY-SA (Open Food Facts product images)"
+  },
+  {
+    "code": "4891028705949",
+    "productName": "柠檬茶",
+    "productUrl": "https://world.openfoodfacts.org/product/4891028705949",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/489/102/870/5949/nutrition_zh.18.full.jpg",
+    "license": "CC BY-SA (Open Food Facts product images)"
+  },
+  {
+    "code": "6901668938824",
+    "productName": "",
+    "productUrl": "https://world.openfoodfacts.org/product/6901668938824",
+    "imageUrl": "https://images.openfoodfacts.org/images/products/690/166/893/8824/nutrition_zh.7.full.jpg",
+    "license": "CC BY-SA (Open Food Facts product images)"
+  }
+]
