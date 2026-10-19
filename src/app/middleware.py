@@ -21,12 +21,25 @@ class RequestGuard:
             return await self.app(scope, receive, send)
         request = Request(scope)
         settings = get_settings()
+        visitor_cookie = None
+        if settings.public_access:
+            from app.services.visitor import visitor_identity
+            identifier, visitor_cookie = visitor_identity(request, settings)
+            scope.setdefault("state", {})["visitor_id"] = identifier
+        original_send = send
+
+        async def scoped_send(message):
+            if visitor_cookie and message["type"] == "http.response.start":
+                message.setdefault("headers", []).append((b"set-cookie", visitor_cookie))
+            await original_send(message)
+
+        send = scoped_send
         try:
             if settings.local_only or (scope["path"].startswith("/api") and scope["path"] not in {"/api/auth/login", "/api/health"}):
                 require_access(request, settings)
             if scope["method"] in {"POST", "PUT", "PATCH", "DELETE"}:
                 origin = request.headers.get("origin")
-                if origin and urlsplit(origin).netloc != request.url.netloc:
+                if origin and origin not in settings.allowed_origins and urlsplit(origin).netloc != request.url.netloc:
                     raise AppError(403, "ORIGIN_REJECTED", "不接受跨站写入")
         except AppError as exc:
             response = JSONResponse({"error": {"code": exc.code, "message": exc.detail}}, status_code=exc.status_code)

@@ -21,6 +21,7 @@ def create_task(db, task_id, source, sample_id, channel, prepared):
             # uncached region-call count once the layout has been validated.
             require_ocr_capacity(db, len(prepared))
         task = Task(id=task_id, status="QUEUED", standard_mode="gb28050_2025_precheck",
+                    owner_id=db.info.get("visitor_id"),
                     channel=channel, source=source, sample_id=sample_id, document_version=0,
                     review_pending=0, files=[record for record, _ in prepared])
         db.add(task)

@@ -99,8 +99,9 @@ async def create_audit(
 
 @router.get("/audits", response_model=AuditList)
 def list_audits(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0), db=Depends(get_db)):
-    total = db.scalar(select(func.count()).select_from(Task))
-    tasks = db.scalars(select(Task).order_by(Task.created_at.desc(), Task.id).offset(offset).limit(limit)).all()
+    scope_filter = [Task.owner_id == db.info["visitor_id"]] if "visitor_id" in db.info else []
+    total = db.scalar(select(func.count()).select_from(Task).where(*scope_filter))
+    tasks = db.scalars(select(Task).where(*scope_filter).order_by(Task.created_at.desc(), Task.id).offset(offset).limit(limit)).all()
     return AuditList(items=[task_schema(t) for t in tasks], total=total, limit=limit, offset=offset)
 
 

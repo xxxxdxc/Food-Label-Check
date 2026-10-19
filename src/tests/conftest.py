@@ -12,6 +12,8 @@ def pytest_configure():
 
 @pytest.fixture(autouse=True)
 def configured_app(monkeypatch, tmp_path):
+    monkeypatch.setenv("PUBLIC_ACCESS", "0")
+    monkeypatch.setenv("ALLOWED_ORIGINS", "[]")
     monkeypatch.setenv("LOCAL_ONLY", "0")
     monkeypatch.setenv("ACCESS_PASSCODE", "test-passcode")
     monkeypatch.setenv("SESSION_SECRET", "test-session-secret")

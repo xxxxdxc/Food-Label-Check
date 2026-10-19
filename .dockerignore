@@ -1,0 +1,16 @@
+.git
+.claude
+**/.env
+**/.env.*
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/*.pyc
+**/*.db
+**/*.sqlite
+src/data
+frontend/dist
+frontend/test-results
+frontend/playwright-report
+**/*.tsbuildinfo

@@ -19,9 +19,12 @@ class Settings(BaseSettings):
         env_file=(PROJECT_ROOT / ".env", SRC_ROOT / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
     local_only: bool = True
+    public_access: bool = False
+    allowed_origins: list[str] = Field(default_factory=list)
     access_passcode: str = ""
     session_secret: str = ""
     baidu_api_key: str | None = None
@@ -44,7 +47,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_vision(self):
-        if not self.local_only and (not self.access_passcode.strip() or not self.session_secret.strip()):
+        if self.public_access:
+            self.local_only = False
+            if len(self.session_secret) < 32:
+                raise ValueError("Public deployments require a private SESSION_SECRET of at least 32 characters")
+        if not self.local_only and not self.public_access and (not self.access_passcode.strip() or not self.session_secret.strip()):
             raise ValueError("Authenticated deployments require ACCESS_PASSCODE and SESSION_SECRET")
         if (self.vlm_enabled or self.ocr_mode == "live") and not (
                 self.vlm_api_key.strip() and self.vlm_model.strip() and self.vlm_base_url.startswith("https://")):

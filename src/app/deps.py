@@ -37,6 +37,8 @@ def require_session(token: str | None = Depends(session_cookie), settings: Setti
 
 
 def require_access(request: Request, settings: Settings = Depends(get_settings)) -> None:
+    if settings.public_access:
+        return
     if not settings.local_only:
         return require_session(request.cookies.get("session"), settings)
     try:
@@ -63,8 +65,10 @@ def rate_limit(request: Request, scope: str, limit: int, seconds: int, record=Tr
             _buckets.popitem(last=False)
 
 
-def get_db():
+def get_db(request: Request):
     with init_db()() as db:
+        if get_settings().public_access:
+            db.info["visitor_id"] = request.state.visitor_id
         yield db
 
 

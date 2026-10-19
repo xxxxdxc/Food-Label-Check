@@ -19,6 +19,7 @@ def utcnow():
 class Task(Base):
     __tablename__ = "tasks"
     id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_id: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String)
     standard_mode: Mapped[str] = mapped_column(String)
     channel: Mapped[str | None] = mapped_column(String)
@@ -193,6 +194,8 @@ def init_db():
             columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(tasks)")}
             if "warnings_json" not in columns:
                 connection.exec_driver_sql("ALTER TABLE tasks ADD COLUMN warnings_json TEXT")
+            if "owner_id" not in columns:
+                connection.exec_driver_sql("ALTER TABLE tasks ADD COLUMN owner_id VARCHAR")
             connection.exec_driver_sql(
                 "UPDATE tasks SET warnings_json='[' || error_json || ']', error_json=NULL "
                 "WHERE status != 'FAILED' AND error_json IS NOT NULL "

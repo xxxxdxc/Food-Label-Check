@@ -27,7 +27,7 @@ def set_status(task: Task, status: str) -> None:
 
 def get_task(db, task_id: str) -> Task:
     task = db.get(Task, task_id)
-    if task is None:
+    if task is None or ("visitor_id" in db.info and task.owner_id != db.info["visitor_id"]):
         raise AppError(404, "AUDIT_NOT_FOUND", "任务不存在")
     return task
 
