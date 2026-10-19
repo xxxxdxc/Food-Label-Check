@@ -17,7 +17,9 @@ def create_task(db, task_id, source, sample_id, channel, prepared):
     try:
         begin_write(db)
         if source == "upload":
-            require_ocr_capacity(db, 2 * len(prepared))
+            # Only a minimum is known before zoning. The worker checks the exact
+            # uncached region-call count once the layout has been validated.
+            require_ocr_capacity(db, len(prepared))
         task = Task(id=task_id, status="QUEUED", standard_mode="gb28050_2025_precheck",
                     channel=channel, source=source, sample_id=sample_id, document_version=0,
                     review_pending=0, files=[record for record, _ in prepared])
@@ -96,7 +98,10 @@ def decide_issue(db, audit_id, issue_id, body):
     if not issue:
         raise AppError(404, "ISSUE_NOT_FOUND", "问题不存在")
     row = db.get(IssueDecision, (audit_id, issue_id, issue.doc_version))
-    if row:
+    if body.decision == "open":
+        if row:
+            db.delete(row)
+    elif row:
         row.decision, row.note = body.decision, body.note
     else:
         db.add(IssueDecision(task_id=audit_id, issue_id=issue_id, doc_version=issue.doc_version,

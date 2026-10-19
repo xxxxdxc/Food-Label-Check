@@ -76,6 +76,7 @@ def task_schema(task: Task) -> AuditTask:
         review_pending=task.review_pending,
         summary=json.loads(task.summary_json) if task.summary_json else None,
         error=json.loads(task.error_json) if task.error_json else None,
+        warnings=json.loads(task.warnings_json) if task.warnings_json else [],
         created_at=task.created_at.replace(tzinfo=timezone.utc),
         updated_at=task.updated_at.replace(tzinfo=timezone.utc),
     )

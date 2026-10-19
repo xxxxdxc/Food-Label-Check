@@ -27,7 +27,7 @@ def load_policy(path=None):
     with open(path or DEFAULT_POLICY, encoding="utf-8") as stream:
         policy = json.load(stream)
     if policy.get("output_basis") != "per_100g":
-        raise ValueError("场景09的课程输出口径必须是 per_100g")
+        raise ValueError("NRV项目预检的参考口径必须是 per_100g")
     if policy.get("rounding") not in ("ROUND_HALF_UP", "ROUND_HALF_EVEN"):
         raise ValueError("未支持的修约方法")
     for item in policy["nrv"].values():
@@ -113,6 +113,8 @@ def normalize_item(metric, item, basis, serving_g):
         "value": value if basis == "per_100g" else value * Decimal(100) / serving_g,
         "unit": expected,
         "half_step": source_step if basis == "per_100g" else source_step * Decimal(100) / serving_g,
+        "source_value": value,
+        "source_half_step": source_step,
         "input": item,
     }
 
@@ -130,6 +132,15 @@ def _round_int(value, policy):
     return value.quantize(Decimal("1"), rounding=mode)
 
 
+def display_number(value):
+    """Round narrative output only; comparisons and audit details keep precision."""
+    return format(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f").rstrip("0").rstrip(".")
+
+
+def basis_label(basis, serving_g=None):
+    return "每份{}g".format(display_number(serving_g)) if basis == "per_serving" else "每100g"
+
+
 def evaluate_l1(data, policy=None):
     policy = policy or load_policy()
     findings = []
@@ -140,14 +151,7 @@ def evaluate_l1(data, policy=None):
     except (KeyError, ValueError) as exc:
         return {}, [finding("L1", "REVIEW", "INPUT-BASIS", str(exc), "input")]
 
-    if basis != "per_100g" or data.get("table_header") != "每100g":
-        header_uncertain = data.get("basis_confidence") is not None and number(data["basis_confidence"]) < Decimal("0.70")
-        findings.append(finding(
-            "L1", "REVIEW" if header_uncertain else "FAIL", "COURSE-100G-001",
-            "本课程交付的营养表须明确写‘每100g’，并以该口径呈现含量和NRV%。",
-            "course_requirement", details={"provided_basis": basis, "provided_header": data.get("table_header")},
-        ))
-
+    source_basis_label = basis_label(basis, serving_g)
     normalized = {}
     low_confidence = set()
     for raw_name, item in data.get("nutrients", {}).items():
@@ -200,9 +204,10 @@ def evaluate_l1(data, policy=None):
             continue
         reference = Decimal(policy["nrv"][metric]["value"])
         expected = _round_int(item["value"] / reference * 100, policy)
-        if basis != "per_100g" or data.get("table_header") != "每100g":
+        if basis != "per_100g":
             status = "REVIEW"  # the shown NRV belongs to the source serving column
-            message = "{}换算到每100g后NRV%应为{}%；原每份列的{}%不能直接当每100g列使用，须整表改写。".format(metric, expected, shown)
+            message = "{}每100g项目预检参考值为{}%；原表{}标示{}%，两者基准不同，不直接比较，也不要求整表改写。".format(
+                metric, expected, source_basis_label, display_number(shown))
         elif metric in low_confidence:
             status = "REVIEW"
             message = "{}的OCR读数待核实；按当前读数每100g NRV%应为{}%，图上似为{}%。".format(metric, expected, shown)
@@ -213,7 +218,10 @@ def evaluate_l1(data, policy=None):
             "L1", status, "NRV-100G-" + metric.upper(),
             message,
             "course_requirement+national_standard", _ev(source),
-            {"value_per_100g": str(item["value"]), "reference": str(reference), "expected_percent": str(expected)},
+            {"value_per_100g": str(item["value"]), "reference": str(reference), "expected_percent": str(expected),
+             "reference_basis": "per_100g", "source_basis": basis,
+             "source_serving_g": str(serving_g) if serving_g is not None else None,
+             "source_nrv_percent": str(shown), "directly_comparable": basis == "per_100g"},
         ))
 
     required = ("protein", "fat", "carbohydrate")
@@ -221,30 +229,45 @@ def evaluate_l1(data, policy=None):
         factors = policy["energy_factors_kj_per_g"]
         ingredients = required + (("fiber",) if "fiber" in normalized else ())
         computed = sum((normalized[k]["value"] * Decimal(factors[k]) for k in ingredients), Decimal(0))
+        source_computed = sum((normalized[k]["source_value"] * Decimal(factors[k]) for k in ingredients), Decimal(0))
         if "energy" in normalized:
             shown = normalized["energy"]["value"]
             uncertainty = normalized["energy"]["half_step"] + sum(
                 (normalized[k]["half_step"] * Decimal(factors[k]) for k in ingredients), Decimal(0)
             )
-            diff = abs(shown - computed)
+            source_shown = normalized["energy"]["source_value"]
+            source_uncertainty = normalized["energy"]["source_half_step"] + sum(
+                (normalized[k]["source_half_step"] * Decimal(factors[k]) for k in ingredients), Decimal(0)
+            )
+            source_tolerance = Decimal("0.5") if basis == "per_100g" else Decimal("0.5") * serving_g / 100
+            diff = abs(source_shown - source_computed)
             if any(k in low_confidence for k in ingredients + ("energy",)):
                 status = "REVIEW"
-            elif diff <= Decimal("0.5"):
+            elif diff <= source_tolerance:
                 status = "PASS"
-            elif diff <= uncertainty:
+            elif diff <= source_uncertainty:
                 status = "REVIEW"
             else:
                 status = "FAIL"
             findings.append(finding(
                 "L1", status, "ENERGY-ARITHMETIC",
-                "每100g能量按已标示供能项算得{}kJ，标签换算值为{}kJ。".format(computed, shown),
+                "{}能量按已标示供能项算得{} kJ，标签标示{} kJ，相差{} kJ。{}".format(
+                    source_basis_label, display_number(source_computed), display_number(source_shown), display_number(diff),
+                    "差值在标示精度推导的±{} kJ修约区间内，需复核。".format(display_number(source_uncertainty)) if status == "REVIEW" and diff <= source_uncertainty
+                    and not any(k in low_confidence for k in ingredients + ("energy",)) else ""),
                 "national_standard", [entry for key in ("energy", *ingredients)
                                       for entry in _ev(normalized[key]["input"])],
                 {"computed_kj_per_100g": str(computed), "shown_kj_per_100g": str(shown),
-                 "rounding_interval_kj": str(uncertainty)},
+                 "rounding_interval_kj": str(uncertainty), "rounding_interval_basis": "per_100g",
+                 "basis": basis, "serving_g": str(serving_g) if serving_g is not None else None,
+                 "computed_kj": str(source_computed), "shown_kj": str(source_shown), "difference_kj": str(diff),
+                 "source_rounding_interval_kj": str(source_uncertainty), "source_pass_tolerance_kj": str(source_tolerance),
+                 "formula": " + ".join("{}×{}".format(display_number(normalized[k]["source_value"]), factors[k])
+                                        for k in ingredients)},
             ))
         else:
-            findings.append(finding("L1", "NOT_CHECKED", "ENERGY-MISSING", "缺少标示能量，无法核对；可计算值为{}kJ/100g。".format(computed), "input"))
+            findings.append(finding("L1", "NOT_CHECKED", "ENERGY-MISSING", "缺少标示能量，无法核对；{}可计算值为{} kJ。".format(
+                source_basis_label, display_number(source_computed)), "input"))
     else:
         findings.append(finding("L1", "NOT_CHECKED", "ENERGY-MISSING", "缺蛋白质、脂肪或碳水，无法核对能量。", "input"))
 
@@ -274,8 +297,12 @@ def evaluate_l1(data, policy=None):
             details = {"value_per_100g": str(value)}
         if metric in low_confidence or ("energy" in low_confidence and "min_per_420kj" in rule):
             status = "REVIEW"
+        details.update(basis="per_100g", source_basis=basis,
+                       threshold_per_100g=rule.get("min_per_100g", rule.get("max_per_100g")),
+                       threshold_per_420kj=rule.get("min_per_420kj"))
+        basis_note = "每100g或每420kJ" if "min_per_420kj" in rule else "每100g"
         findings.append(finding("L1", status, "CLAIM-" + claim.upper(),
-                                "{}声称检查：{}。".format(claim, status), "national_standard",
+                                "{}声称按{}门槛检查：{}。".format(claim, basis_note, status), "national_standard",
                                 _ev(normalized[metric]["input"]), details))
 
     actual = data.get("actual_per_100g") or {}
@@ -301,7 +328,8 @@ def evaluate_l1(data, policy=None):
         limit = normalized[metric]["value"] * Decimal(rule["factor"])
         passes = actual_value >= limit if rule["direction"] == "min" else actual_value <= limit
         findings.append(finding("L1", "REVIEW" if metric in low_confidence else ("PASS" if passes else "FAIL"), "ACTUAL-" + metric.upper(),
-                                "{}实际值{}，界限{}。".format(metric, actual_value, limit),
+                                "{}按每100g比较实际值{}与界限{}（单位{}）。".format(
+                                    metric, display_number(actual_value), display_number(limit), normalized[metric]["unit"]),
                                 "national_standard", details={"actual_per_100g": str(actual_value), "limit": str(limit)}))
 
     grouped = defaultdict(list)
@@ -340,7 +368,7 @@ def evaluate_l1(data, policy=None):
         status = "REVIEW" if uncertain else ("PASS" if len({x["value"] for x in normalized_values}) == 1 else ("REVIEW" if overlap else "FAIL"))
         evidence = [e for x in entries for e in _ev(x)]
         findings.append(finding("L1", status, "CROSS-" + str(key[2]),
-                                "同SKU同版次同一事实跨位置比较：{}。".format(status),
+                                "同SKU同版次同一事实统一换算至每100g后跨位置比较：{}。".format(status),
                                 "cross_position", evidence,
                                 {"values_per_100g": [str(x["value"]) for x in normalized_values],
                                  "range": [str(low), str(high)]}))

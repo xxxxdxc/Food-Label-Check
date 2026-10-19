@@ -79,7 +79,7 @@ def search(query, method="lexical", top_k=3, documents=None, cache_dir=None):
 
 
 RETRIEVAL_CASES = [
-    ("每份40克蛋白质如何统一到百克口径", "COURSE-100G-001"),
+    ("每份40克蛋白质如何统一到百克口径", "NRV-BASIS-POLICY"),
     ("蛋白脂肪碳水算千焦还有纤维", "GB28050-ENERGY"),
     ("糖在营养成分表NRV一栏留空", "GB28050-NRV"),
     ("检测出的真实含量比标签标注高多少", "GB28050-TOLERANCE"),
@@ -87,8 +87,8 @@ RETRIEVAL_CASES = [
     ("高蛋白宣传需要多少克", "GB28050-HIGH-PROTEIN"),
     ("商超客户专供包材审核退回经验", "CHANNEL-REVIEW"),
     ("品牌调性意见和审核人争议怎么处理", "HUMAN-DECISION"),
-    ("一包重四十克，蛋白2.9克，输出列头该怎么写", "COURSE-100G-001"),
-    ("营养表写每份72克，课程交付应该换算成什么", "COURSE-100G-001"),
+    ("一包重四十克，蛋白2.9克，输出列头该怎么写", "NRV-BASIS-POLICY"),
+    ("营养表写每份72克，课程交付应该换算成什么", "NRV-BASIS-POLICY"),
     ("营养表千焦数与蛋白质脂肪碳水算出来不一样", "GB28050-ENERGY"),
     ("膳食纤维参与热量计算吗，糖要重复加吗", "GB28050-ENERGY"),
     ("营养素参考值百分比的分母选什么", "GB28050-NRV"),

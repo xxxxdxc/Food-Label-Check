@@ -1,0 +1,65 @@
+{
+  "version": "claim-reference-set-v1",
+  "items": [
+    {
+      "id": "claim-rules-review-question",
+      "title": "敏感宣称快速检查清单",
+      "source_type": "internal_guidance",
+      "file": "claim-rules.md",
+      "section": "敏感宣称快速检查清单",
+      "excerpt": "- [ ] 「0添加」「无添加」→ 具体指什么？有依据吗？",
+      "sha256": "3939b17a5db8974fb085587525115a705d93c4eff1b48119e3017fa6fab0ac9b",
+      "scope_keywords": [
+        "0添加",
+        "无添加"
+      ],
+      "source_verification": "source_unverified",
+      "can_support_verdict": false,
+      "review": {
+        "date": "2026-10-19",
+        "reviewer": "Codex source audit",
+        "decision": "admitted_as_material_prompt_only",
+        "reason": "仅提出核查问题，不宣称具体规则、国标条款或产品事实；不能作为真实性证明。"
+      }
+    },
+    {
+      "id": "channel-requirements-review-question",
+      "title": "渠道适配检查清单",
+      "source_type": "internal_guidance",
+      "file": "channel-requirements.md",
+      "section": "渠道适配检查清单",
+      "excerpt": "- [ ] 目标渠道是否有特殊包装要求？",
+      "sha256": "60c7e2f6ca73c9c4657919fb11f3c6d14b7fb20f3f964a92fcea846cd1632d03",
+      "scope_keywords": [
+        "渠道"
+      ],
+      "source_verification": "source_unverified",
+      "can_support_verdict": false,
+      "review": {
+        "date": "2026-10-19",
+        "reviewer": "Codex source audit",
+        "decision": "admitted_as_material_prompt_only",
+        "reason": "仅提出核查问题，不宣称具体规则、国标条款或产品事实；不能作为真实性证明。"
+      }
+    }
+  ],
+  "excluded": [
+    {
+      "file": "case-studies.md",
+      "sha256": "004011490da978092e106d9d5f65316baf0b0e6742ca301feb3e6acf336e6873",
+      "reason": "无原始审核单、日期、签核与具体适用渠道，个案不可泛化为规则。"
+    },
+    {
+      "file": "gb7718-summary.md",
+      "reason": "2011版摘要且缺原文核验，不准入2025预检。"
+    },
+    {
+      "file": "gb28050-2025-summary.md",
+      "reason": "本轮未核对正式原文，不准入数值或条款。"
+    },
+    {
+      "file": "claim-rules.md, channel-requirements.md (remaining content)",
+      "reason": "未经原文或适用渠道核实的数值、禁用及替换建议均排除。"
+    }
+  ]
+}

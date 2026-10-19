@@ -27,10 +27,10 @@ class L1Tests(unittest.TestCase):
         self.assertEqual(p["sources"]["course"]["authority"], "course_requirement")
         self.assertEqual(p["sources"]["nutrition"]["authority"], "national_standard")
 
-    def test_teacher_example_rewrites_entire_row_to_per100g(self):
+    def test_serving_example_keeps_source_basis_and_per100g_nrv_reference(self):
         report = run(example("course_40g.json"))
         self.assertEqual(report["normalized_per_100g"]["protein"]["value"], "7.25")
-        self.assertEqual(by_rule(report, "COURSE-100G-001")[0]["status"], "FAIL")
+        self.assertFalse(by_rule(report, "COURSE-100G-001"))
         nrv = by_rule(report, "NRV-100G-PROTEIN")[0]
         self.assertEqual(nrv["details"]["expected_percent"], "12")
         self.assertEqual(nrv["status"], "REVIEW")  # source 5% is per serving, not per100g
@@ -113,7 +113,7 @@ class L1Tests(unittest.TestCase):
         claim = by_rule(report, "CLAIM-HIGH_FIBER")[0]
         self.assertEqual(claim["status"], "FAIL")
         self.assertAlmostEqual(float(claim["details"]["value_per_100g"]), 5.69, places=2)
-        self.assertEqual(by_rule(report, "COURSE-100G-001")[0]["status"], "FAIL")
+        self.assertFalse(by_rule(report, "COURSE-100G-001"))
         self.assertFalse(any(f["rule_id"].startswith("NRV-100G") and f["status"] == "FAIL" for f in report["findings"]))
 
     def test_claim_alternative_per420kj_is_supported(self):
@@ -230,7 +230,7 @@ class L2L3Tests(unittest.TestCase):
 class RetrievalTests(unittest.TestCase):
     def test_lexical_search_returns_traceable_rule(self):
         rows = search("每份数据统一换算为每100g", top_k=3)
-        self.assertEqual(rows[0]["id"], "COURSE-100G-001")
+        self.assertEqual(rows[0]["id"], "NRV-BASIS-POLICY")
         self.assertTrue(rows[0]["source"])
 
 

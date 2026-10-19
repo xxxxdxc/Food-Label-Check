@@ -57,7 +57,7 @@ def test_vision_instruction_or_ready_status_in_output_is_rejected():
         import_candidates(structural_doc(), image_bytes(), candidate)
 
 
-def test_vision_failure_falls_back_without_failing_task(client, monkeypatch):
+def test_legacy_extraction_never_triggers_vlm_transcription(client, monkeypatch):
     monkeypatch.setenv("VLM_ENABLED", "1")
     monkeypatch.setenv("VLM_MODEL", "test-model")
     monkeypatch.setenv("VLM_API_KEY", "test-key")
@@ -65,13 +65,14 @@ def test_vision_failure_falls_back_without_failing_task(client, monkeypatch):
     get_settings.cache_clear()
     monkeypatch.setattr("app.worker.extract", lambda task, _: bind_document(structural_doc(), task.id, task.files[0]))
     def failure(*_args):
-        raise ServiceError("VLM_FALLBACK", "自动识别失败，请手动核对该表")
+        pytest.fail("layout-first workers must never perform VLM field transcription")
     monkeypatch.setattr("app.services.vision_client.propose_tables", failure)
     task = create_upload(client)
     assert run_one()
     result = client.get("/api/audits/" + task["id"]).json()
     assert result["status"] == "WAITING_REVIEW", result
-    assert result["error"]["code"] == "VLM_FALLBACK"
+    assert result["error"] is None
+    assert result["warnings"] == []
 
 
 def test_missing_table_can_be_entered_manually_and_checked(client, monkeypatch):
@@ -159,7 +160,11 @@ def test_real_parser_path_saves_raw_responses_and_structural_review(client):
     assert run_one(Client())
     result = client.get("/api/audits/" + task["id"]).json()
     assert result["status"] == "WAITING_REVIEW", result
-    assert len(list((get_settings().data_dir / "ocr" / task["id"]).glob("*.json"))) == 2
+    raw = get_settings().data_dir / "ocr" / task["id"]
+    assert len(list(raw.glob("r1-*.json"))) == 2
+    plan = json.loads(next(raw.glob("z1-*.json")).read_text(encoding="utf-8"))
+    assert plan["mode"] == "whole_image_fallback"
+    assert all("response" in json.loads(p.read_text(encoding="utf-8")) for p in raw.glob("r1-*.json"))
 
 
 def test_failed_logins_limit_and_tampered_cookie():

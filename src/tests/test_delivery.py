@@ -111,7 +111,7 @@ def test_chunked_body_limit_is_413(client):
     assert response.status_code == 413, response.text
 
 
-def test_uploaded_png_loses_exif_and_keeps_original_pixel_coordinates():
+def test_uploaded_png_applies_exif_orientation_before_stripping_metadata():
     import io
     from PIL import Image
     from app.services.storage import validate_image
@@ -123,4 +123,4 @@ def test_uploaded_png_loses_exif_and_keeps_original_pixel_coordinates():
     encoded, width, height, *_ = validate_image(source.getvalue())
     with Image.open(io.BytesIO(encoded)) as sanitized:
         assert not sanitized.getexif()
-        assert sanitized.size == (width, height) == (120, 100)
+        assert sanitized.size == (width, height) == (100, 120)

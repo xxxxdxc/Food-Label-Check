@@ -3,7 +3,7 @@ from urllib.parse import urlsplit
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from app.config import get_settings
-from app.deps import require_session
+from app.deps import require_access
 from app.errors import AppError
 
 
@@ -17,13 +17,13 @@ class RequestGuard:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or not scope["path"].startswith("/api"):
+        if scope["type"] != "http":
             return await self.app(scope, receive, send)
         request = Request(scope)
         settings = get_settings()
         try:
-            if scope["path"] not in {"/api/auth/login", "/api/health"}:
-                require_session(request.cookies.get("session"), settings)
+            if settings.local_only or (scope["path"].startswith("/api") and scope["path"] not in {"/api/auth/login", "/api/health"}):
+                require_access(request, settings)
             if scope["method"] in {"POST", "PUT", "PATCH", "DELETE"}:
                 origin = request.headers.get("origin")
                 if origin and urlsplit(origin).netloc != request.url.netloc:
@@ -31,6 +31,8 @@ class RequestGuard:
         except AppError as exc:
             response = JSONResponse({"error": {"code": exc.code, "message": exc.detail}}, status_code=exc.status_code)
             return await response(scope, receive, send)
+        if not scope["path"].startswith("/api"):
+            return await self.app(scope, receive, send)
         limit = (3 * settings.max_upload_mb * 1024 * 1024 + 1024 * 1024
                  if scope["path"] == "/api/audits" and scope["method"] == "POST" else 2 * 1024 * 1024)
         try:

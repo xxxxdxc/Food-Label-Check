@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 
 from app.config import Settings, get_settings
 from app.db import Document, File as StoredFile, Task
-from app.deps import SESSION_TTL_SECONDS, get_db, make_session, rate_limit, require_session
+from app.deps import SESSION_TTL_SECONDS, get_db, make_session, rate_limit, require_access
 from app.engine_bridge import SCOPE
 from app.errors import AppError
 from app.schemas.contract import (
@@ -26,13 +26,15 @@ from app.services.report import issues_for_task, report_html, report_json
 from app.services.review_service import apply_corrections
 from app.services.storage import file_path, prepare_upload
 from app.services import commands
+from app.schemas.contract import ClaimPrechecksResponse
 
 public_router = APIRouter(
     prefix="/api", responses={422: {"model": ErrorResponse}},
 )
+
 router = APIRouter(
     prefix="/api",
-    dependencies=[Depends(require_session)],
+    dependencies=[Depends(require_access)],
     responses={
         code: {"model": ErrorResponse}
         for code in (401, 404, 409, 413, 415, 422, 429)
@@ -40,8 +42,10 @@ router = APIRouter(
 )
 
 
-@public_router.post("/auth/login", response_model=LoginResponse, responses={401: {"model": ErrorResponse}})
+@public_router.post("/auth/login", response_model=LoginResponse, responses={401: {"model": ErrorResponse}}, include_in_schema=False)
 def login(body: LoginRequest, request: Request, settings: Settings = Depends(get_settings)) -> Response:
+    if settings.local_only:
+        raise AppError(410, "LOGIN_NOT_REQUIRED", "本机工作台无需口令，直接进入工作台即可")
     rate_limit(request, "login", 5, 600, record=False)
     if not hmac.compare_digest(body.passcode.encode(), settings.access_passcode.encode()):
         rate_limit(request, "login", 5, 600)
@@ -188,3 +192,21 @@ def get_report(audit_id: str, format: Literal["json", "html"] = "json", db=Depen
 @router.post("/audits/{audit_id}/retry", response_model=JobReceipt)
 def retry_audit(audit_id: str, db=Depends(get_db)):
     return commands.retry_task(db, audit_id)
+
+
+@router.get("/audits/{audit_id}/claim-prechecks", response_model=ClaimPrechecksResponse)
+def get_claim_prechecks(audit_id: str, version: int | None = Query(None, ge=0), db=Depends(get_db)):
+    from app.services.claim_precheck import response_for
+    task = get_task(db, audit_id)
+    target = task.document_version if version is None else version
+    return response_for(db, task, current_document(db, task, target), target)
+
+
+@router.post("/audits/{audit_id}/claim-prechecks/retry", response_model=ClaimPrechecksResponse)
+def retry_claim_prechecks(audit_id: str, request: Request, version: int = Query(..., ge=0), db=Depends(get_db)):
+    from app.services.claim_precheck import retry
+    from app.deps import begin_write
+    rate_limit(request, "claim-retry", 5, 60)
+    begin_write(db)
+    task = get_task(db, audit_id)
+    return retry(db, task, current_document(db, task, version), version)

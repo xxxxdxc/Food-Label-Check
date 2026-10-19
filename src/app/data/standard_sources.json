@@ -1,0 +1,28 @@
+[
+  {
+    "standard": "GB 28050",
+    "edition": "2025",
+    "source_title": "食品安全国家标准 预包装食品营养标签通则",
+    "source_url": "https://hncdc.com/upload/1/cms/content/editor/1762393427122.pdf",
+    "host": "湖南省疾病预防控制中心",
+    "verified_at": "2026-10-20",
+    "sha256": "a611bfc9ee3167dfabb46688fcc6c41cc92af330b677f71646ce7ee5f4b1e6c2",
+    "pages": 22,
+    "verification_scope": "已下载核对首页编号、标题及版本；提供整本标准参考，不表示逐条匹配已核验",
+    "rule_prefixes": ["NRV-", "ACTUAL-", "CLAIM-HIGH_", "CLAIM-LOW_SUGAR", "CLAIM-SUGAR_FREE"],
+    "rule_ids": ["ENERGY-ARITHMETIC", "ENERGY-MISSING"]
+  },
+  {
+    "standard": "GB 7718",
+    "edition": "2025",
+    "source_title": "食品安全国家标准 预包装食品标签通则",
+    "source_url": "https://www.dhms.gov.cn/jdj/Attach/2506/074V6Z9BN825063011415135B3A489.pdf",
+    "host": "芒市人民政府",
+    "verified_at": "2026-10-20",
+    "sha256": "8fc5a1ed7afecc5a684909bd1782165e1d56674cb081eacc251b01bebc3be5d0",
+    "pages": 16,
+    "verification_scope": "已下载核对首页编号、标题及版本；提供整本标准参考，不表示逐条匹配已核验",
+    "rule_prefixes": ["PACKAGE-", "INGREDIENT-", "ALLERGEN-"],
+    "rule_ids": []
+  }
+]

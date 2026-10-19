@@ -29,6 +29,7 @@ class Task(Base):
     review_pending: Mapped[int] = mapped_column(Integer, default=0)
     summary_json: Mapped[str | None] = mapped_column(Text)
     error_json: Mapped[str | None] = mapped_column(Text)
+    warnings_json: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     files: Mapped[list[File]] = relationship(back_populates="task", cascade="all, delete-orphan")
@@ -121,6 +122,48 @@ class RuleClause(Base):
     source_note: Mapped[str | None] = mapped_column(Text)
 
 
+class ClaimPrecheck(Base):
+    __tablename__ = "claim_prechecks"
+    __table_args__ = (UniqueConstraint("task_id", "doc_version", "fingerprint"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), index=True)
+    doc_version: Mapped[int] = mapped_column(Integer)
+    fingerprint: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, index=True)
+    input_json: Mapped[str] = mapped_column(Text)
+    result_json: Mapped[str | None] = mapped_column(Text)
+    error_code: Mapped[str | None] = mapped_column(String)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ClaimPrecheckAttempt(Base):
+    __tablename__ = "claim_precheck_attempts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("claim_prechecks.id"), index=True)
+    attempt: Mapped[int] = mapped_column(Integer)
+    result_json: Mapped[str | None] = mapped_column(Text)
+    error_code: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ClaimPrecheckValidation(Base):
+    """A derived offline validation; never another model request/attempt."""
+    __tablename__ = "claim_precheck_validations"
+    __table_args__ = (UniqueConstraint("source_attempt_id", "validator_version"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("claim_prechecks.id"), index=True)
+    source_attempt_id: Mapped[int] = mapped_column(ForeignKey("claim_precheck_attempts.id"))
+    validator_version: Mapped[str] = mapped_column(String)
+    input_fingerprint: Mapped[str] = mapped_column(String)
+    raw_sha256: Mapped[str] = mapped_column(String)
+    result_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 _engine = None
 Session = None
 _db_path = None
@@ -144,6 +187,16 @@ def init_db():
             cursor.close()
         Session = sessionmaker(_engine, expire_on_commit=False)
         Base.metadata.create_all(_engine)
+        # create_all does not add columns to databases from previous releases.
+        with _engine.begin() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(tasks)")}
+            if "warnings_json" not in columns:
+                connection.exec_driver_sql("ALTER TABLE tasks ADD COLUMN warnings_json TEXT")
+            connection.exec_driver_sql(
+                "UPDATE tasks SET warnings_json='[' || error_json || ']', error_json=NULL "
+                "WHERE status != 'FAILED' AND error_json IS NOT NULL "
+                "AND json_extract(error_json, '$.code') LIKE 'VLM_%' AND warnings_json IS NULL")
     return Session
 
 

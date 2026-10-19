@@ -34,7 +34,9 @@ def run(data, store=None, policy=None):
         status = "PASS"
     return {
         "product_id": data.get("product_id"), "revision": data.get("revision"),
-        "policy_version": policy["version"], "output_header": "每100g",
+        "policy_version": policy["version"], "output_header": data.get("table_header") or {
+            "per_100g": "每100g", "per_serving": "每份", "per_100ml": "每100mL"}.get(data.get("basis"), "未确认"),
+        "calculation_bases": {"nrv_reference": "per_100g", "energy": data.get("basis"), "claims": "rule_specific"},
         "normalized_per_100g": normalized, "status": status,
         "scope": "仅对已提供数据及已确认规则完成初检，不代表最终印刷或上市放行。",
         "findings": findings,

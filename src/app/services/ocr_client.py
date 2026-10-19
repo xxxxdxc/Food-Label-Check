@@ -27,7 +27,7 @@ def require_ocr_capacity(db, calls):
     day = datetime.now(timezone.utc).date().isoformat()
     usage = db.get(Usage, (day, "ocr"))
     if (usage.count if usage else 0) + calls > get_settings().daily_ocr_limit:
-        raise AppError(429, "OCR_QUOTA", "剩余每日 OCR 调用额度不足，请使用缓存样本或稍后再试")
+        raise AppError(429, "OCR_QUOTA", "剩余每日 OCR 调用额度不足，请稍后再试")
 
 
 def reserve_usage(service, limit):

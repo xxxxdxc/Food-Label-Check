@@ -14,6 +14,7 @@ from app.services.audit_service import current_document, task_schema
 from app.services.projection import project_fields
 from app.services.storage import file_path
 from app.services.samples import catalog
+from app.services.regulation import standard_source
 
 
 def latest_run(db, task):
@@ -29,6 +30,7 @@ def issues_for_task(db, task):
     result = []
     for row in db.scalars(select(Issue).where(Issue.check_run_id == run.id).order_by(Issue.id)):
         item = AuditIssue.model_validate_json(row.issue_json)
+        item.regulation = standard_source(item.regulation, item.rule_id)
         item.review_decision = decisions.get(item.issue_id, "open")
         result.append(item)
     rank = {"FAIL": 0, "REVIEW": 1, "NOT_CHECKED": 2, "PASS": 3}
@@ -58,13 +60,18 @@ def report_html(report, task):
         rows = []
         for item in items:
             rule = item.regulation
-            regulation = (rule.standard + "-" + rule.edition + " " + (rule.clause_id or "")
-                          if rule.verification_status == "verified" else
-                          "课程/内部要求，非国标条款" if rule.verification_status == "course_requirement" else "条款待确认")
+            regulation = (rule.standard + "—" + rule.edition + " " + (rule.source_title or "")
+                          if rule.verification_status not in {"course_requirement", "not_applicable"} and rule.standard else
+                          "课程/内部要求，非国标条款" if rule.verification_status == "course_requirement" else
+                          "当前固定规则未覆盖" if rule.verification_status == "not_applicable" else "暂无关联标准")
+            regulation = escape(regulation)
+            if rule.source_url and rule.source_url.startswith("https://"):
+                regulation += '<br><a href="' + escape(rule.source_url, quote=True) + '" target="_blank" rel="noopener noreferrer">查看标准原文</a>'
             evidence = "；".join(e.text for e in item.evidence)
             calculation = json.dumps(item.calculation, ensure_ascii=False) if item.calculation else ""
             rows.append("<tr>" + "".join("<td>" + escape(str(v)) + "</td>" for v in
-                        (item.rule_id, item.status, item.message, evidence, calculation, regulation, item.review_decision)) + "</tr>")
+                        (item.rule_id, item.status, item.message, evidence, calculation))
+                        + "<td>" + regulation + "</td><td>" + escape(item.review_decision) + "</td></tr>")
         return "<table><tr><th>规则</th><th>结论</th><th>发现</th><th>证据</th><th>计算</th><th>依据</th><th>人工决定</th></tr>" + "".join(rows) + "</table>"
     images = []
     for file in task.files:

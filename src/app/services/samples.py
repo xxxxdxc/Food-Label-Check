@@ -2,7 +2,9 @@
 import copy
 import hashlib
 import json
+import re
 import uuid
+from decimal import Decimal, InvalidOperation
 
 from app.config import SRC_ROOT
 from app.db import File
@@ -46,6 +48,12 @@ def bind_document(original, task_id, file):
                     result[key] = file.id if item is not None else None
                 elif key == "tableId":
                     result[key] = table_map.get(item, item)
+                elif key == "evidence_id":
+                    result[key] = evidence_map.get(item, item)
+                elif key == "image_id":
+                    result[key] = file.id
+                elif key == "vision_no_table_images":
+                    result[key] = [file.id for _ in item]
                 else:
                     result[key] = rewrite(item)
             return result
@@ -67,6 +75,15 @@ def bind_document(original, task_id, file):
 def merge_documents(documents):
     result = copy.deepcopy(documents[0])
     for doc in documents[1:]:
+        offset = len(result["facts"]["nutritionTables"])
+        platform = result.setdefault("_platform", {})
+        platform.setdefault("extraction", []).extend(copy.deepcopy(doc.get("_platform", {}).get("extraction", [])))
+        for path, comparison in doc.get("_platform", {}).get("comparisons", {}).items():
+            if path.startswith("facts.nutritionTables["):
+                path = re.sub(r"\[(\d+)\]", lambda m: "[" + str(int(m[1]) + offset) + "]", path, count=1)
+            if path.startswith("facts.nutritionTables[") or result["facts"].get(path.removeprefix("facts."), {}).get("status") == "missing":
+                platform.setdefault("comparisons", {})[path] = copy.deepcopy(comparison)
+        platform.setdefault("vision_no_table_images", []).extend(doc.get("_platform", {}).get("vision_no_table_images", []))
         for key in ("images", "evidence", "tableDiagnostics", "unassignedEvidenceIds"):
             result.setdefault(key, []).extend(doc.get(key, []))
         for key in ("nutritionTables", "claims", "barcodes"):
@@ -78,19 +95,46 @@ def merge_documents(documents):
     if len(product_ids) > 1:
         result["productId"] = None
         result["productIdSource"] = "unknown"
-    # Associate image-wide failures only with a wholly pending table from that image.
-    # Ready tables never acquire replacement permission from a neighboring failure.
-    for diagnostic in result.get("tableDiagnostics", []):
-        if diagnostic["status"] != "needs_vision" or diagnostic.get("tableId") is not None:
-            continue
-        evidence = {e["id"]: e for e in result["evidence"]}
+    comparisons = result.setdefault("_platform", {}).setdefault("comparisons", {})
+    for key in ("productName", "netContent", "ingredientsText", "allergenText"):
         candidates = []
-        for table in result["facts"]["nutritionTables"]:
-            sources = [evidence[r] for r in table["basis"]["sourceRefs"] if r in evidence]
-            if (table["basis"]["status"] == "needs_review" and sources and
-                    all(e["imageId"] == diagnostic["imageId"] for e in sources) and
-                    all(row["amount"]["status"] == "needs_review" for row in table["rows"])):
-                candidates.append(table)
-        if len(candidates) == 1:
-            diagnostic["tableId"] = candidates[0]["id"]
-    return result
+        sources = []
+        signatures = set()
+        reasons = []
+        pending_field = False
+        for doc in documents:
+            field = doc["facts"][key]
+            if field["status"] == "missing":
+                continue
+            value = field["value"]
+            if key == "netContent" and value is not None:
+                try:
+                    value = Decimal(value)
+                except InvalidOperation:
+                    pass
+            signatures.add((value, field["unit"]))
+            candidates.append({"image_id": doc["images"][0]["id"], "raw": field["raw"],
+                               "value": field["value"], "unit": field["unit"]})
+            sources.extend(field["sourceRefs"])
+            if field["status"] == "needs_review":
+                pending_field = True
+                reasons.extend(field["reviewReasons"])
+            comparison = doc.get("_platform", {}).get("comparisons", {}).get("facts." + key, {})
+            if comparison.get("vision") and (
+                    comparison.get("agreement") == "disagree" or not comparisons.get("facts." + key, {}).get("vision")):
+                comparisons["facts." + key] = copy.deepcopy(comparison)
+        if len(signatures) > 1 or pending_field:
+            field = result["facts"][key]
+            field["status"] = "needs_review"
+            field["sourceRefs"] = list(dict.fromkeys(sources))
+            field["reviewReasons"] = list(dict.fromkeys([*field["reviewReasons"], *reasons]))
+        if len(signatures) > 1:
+            field["reviewReasons"].append("MULTI_IMAGE_CONFLICT")
+            comparisons.setdefault("facts." + key, {})["candidates"] = candidates
+        comparison = comparisons.get("facts." + key, {})
+        visual = comparison.get("vision")
+        if comparison.get("agreement") in {"agree", "disagree"} and visual and visual.get("value") is not None and result["facts"][key].get("value") is not None:
+            from app.services.vision_client import equivalent
+            comparison["agreement"] = "agree" if equivalent(result["facts"][key], visual) else "disagree"
+    from app.services.table_association import associate_review_tables
+    return associate_review_tables(result)

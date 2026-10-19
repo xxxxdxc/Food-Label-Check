@@ -3,7 +3,8 @@
 *.env.local
 
 # runtime data
-data/
+/data/
+/src/data/
 *.db
 *.sqlite
 
@@ -16,3 +17,6 @@ __pycache__/
 # node
 node_modules/
 frontend/dist/
+
+# local agent worktrees
+.claude/worktrees/

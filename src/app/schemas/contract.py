@@ -25,6 +25,7 @@ class TaskError(BaseModel):
     code: str
     message: str
     retryable: bool
+    image_id: str | None = None
 
 
 class ErrorBody(BaseModel):
@@ -75,11 +76,32 @@ class AuditTask(BaseModel):
     review_pending: int = Field(ge=0)
     summary: dict[str, int] | None
     error: TaskError | None
+    warnings: list[TaskError] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
 
-class AuditField(BaseModel):
+class VisionValue(BaseModel):
+    raw: str | None
+    value: str | None
+    unit: str | None
+    evidence_id: str
+
+
+class FieldCandidate(BaseModel):
+    image_id: str
+    raw: str | None
+    value: str | None
+    unit: str | None
+
+
+class Comparison(BaseModel):
+    vision: VisionValue | None = None
+    agreement: Literal["agree", "disagree", "vision_only", "ocr_only"] | None = None
+    candidates: list[FieldCandidate] = Field(default_factory=list)
+
+
+class AuditField(Comparison):
     field_id: str
     group: Literal["basic", "nutrition"]
     label: str
@@ -96,8 +118,10 @@ class Regulation(BaseModel):
     standard: str
     edition: str
     clause_id: str | None
-    verification_status: Literal["verified", "pending", "course_requirement"]
+    verification_status: Literal["verified", "pending", "course_requirement", "not_applicable"]
     note: str | None
+    source_title: str | None = None
+    source_url: str | None = None
 
 
 class AuditIssue(BaseModel):
@@ -113,6 +137,7 @@ class AuditIssue(BaseModel):
     suggestion: str | None
     doc_version: int = Field(ge=0)
     review_decision: Literal["open", "confirmed", "false_positive"] = "open"
+    claim_id: str | None = None
 
 
 class LoginRequest(BaseModel):
@@ -158,7 +183,7 @@ class FieldsResponse(BaseModel):
     fields: list[AuditField]
 
 
-class ReviewItem(BaseModel):
+class ReviewItem(Comparison):
     path: str
     raw: str | None
     value: str | None
@@ -174,9 +199,12 @@ class TableReviewItem(BaseModel):
     image_id: str | None
     box_px: BoxPx | None
     evidence_refs: list[str]
+    vision_no_table: bool = False
 
 
 class ReviewItemsResponse(BaseModel):
+    pipeline: str = "legacy_ocr_vision"
+    extraction: list[dict[str, Any]] = Field(default_factory=list)
     document_version: int = Field(ge=0)
     items: list[ReviewItem]
     table_items: list[TableReviewItem]
@@ -222,6 +250,7 @@ class CorrectionsRequest(BaseModel):
     table_decisions: list[TableDecision] = Field(default_factory=list, alias="tableDecisions")
     table_checked_all: bool = False
     manual_tables: list[ManualTable] = Field(default_factory=list)
+    no_table_images: list[str] = Field(default_factory=list)
 
 
 class ManualRow(BaseModel):
@@ -253,7 +282,7 @@ class JobReceipt(BaseModel):
 
 
 class IssueDecisionRequest(BaseModel):
-    decision: Literal["confirmed", "false_positive"]
+    decision: Literal["open", "confirmed", "false_positive"]
     note: str | None = None
 
 
@@ -267,3 +296,49 @@ class AuditReport(BaseModel):
     confirmed_fields: list[str]
     corrections: list[dict[str, Any]] = Field(default_factory=list)
     sample_attribution: SampleAttribution | None = None
+
+
+class ClaimReference(BaseModel):
+    id: str
+    title: str
+    source_type: str
+    file: str
+    section: str
+    excerpt: str
+    sha256: str
+    scope_keywords: list[str]
+    source_verification: str
+    can_support_verdict: bool
+    review: dict[str, str]
+
+
+class ClaimPrecheckItem(BaseModel):
+    claim_id: str
+    claim_text: str
+    claim_category: str
+    source_evidence_refs: list[str]
+    status: Literal["pending", "running", "completed", "unavailable"]
+    verdict: Literal["supported", "contradiction", "insufficient_evidence"] | None = None
+    reason: str | None = None
+    supporting_evidence_refs: list[str] = Field(default_factory=list)
+    reference_citations: list[ClaimReference] = Field(default_factory=list)
+    missing_materials: list[str] = Field(default_factory=list)
+    model_requested: str
+    model_actual: str | None = None
+    reference_set_version: str
+    prompt_version: str
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+class ClaimPrechecksResponse(BaseModel):
+    document_version: int
+    schema_version: Literal["claim-precheck-v2"] = "claim-precheck-v2"
+    status: Literal["pending", "running", "completed", "partial", "unavailable"]
+    stale: bool
+    items: list[ClaimPrecheckItem]
+    error_code: str | None = None
+    error_message: str | None = None
+    reference_notice: str | None = None
+    validator_version: str | None = None
+    revalidated_from_attempt_id: int | None = None

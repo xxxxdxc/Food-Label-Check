@@ -129,15 +129,23 @@ def apply_decisions(doc: LabelDocument, image_bytes: bytes, decisions: dict) -> 
             raise ValueError("Duplicate or missing table decision")
         seen_tables.add(table_id)
         diagnostic = next((item for item in reviewed.tableDiagnostics
-                           if item.tableId == table_id and item.status == "needs_review"), None)
+                           if item.tableId == table_id and item.status in {"needs_review", "needs_vision"}
+                           and item.code == decision.get("originalCode")
+                           and item.evidenceRefs == decision.get("sourceEvidenceRefs")), None)
         table = next((item for item in reviewed.facts.nutritionTables if item.id == table_id), None)
         if (diagnostic is None or table is None or diagnostic.imageId != target_image.id or decision.get("originalCode") != diagnostic.code
                 or decision.get("sourceEvidenceRefs") != diagnostic.evidenceRefs):
             raise ValueError(f"Stale table decision: {table_id}")
-        if not table.rows or table.basis.status != "ready" or any(
-            field.status != "ready" for row in table.rows
-            for field in (row.nutrient, row.amount, row.nrvPercent) if field is not None
-        ):
+        fields = [field for row in table.rows
+                  for field in (row.nutrient, row.amount, row.nrvPercent) if field is not None]
+        if table.basis.servingSize is not None:
+            fields.append(table.basis.servingSize)
+        refs = set(table.sourceRefs + table.basis.sourceRefs + diagnostic.evidenceRefs)
+        refs.update(ref for field in fields for ref in field.sourceRefs)
+        if any(item.imageId not in {target_image.id, None} for item in reviewed.evidence if item.id in refs):
+            raise ValueError(f"Review table belongs to another image: {table_id}")
+        if (not table.rows or table.basis.status != "ready" or table.basis.kind == "unknown"
+                or any(field.status != "ready" for field in fields)):
             raise ValueError(f"Confirm all table fields before table completeness: {table_id}")
         evidence_id = f"manual-review:{len(reviewed.evidence) + 1}"
         while any(item.id == evidence_id for item in reviewed.evidence):

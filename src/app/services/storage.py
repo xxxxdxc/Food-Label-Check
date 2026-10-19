@@ -7,7 +7,7 @@ import warnings
 import uuid
 from pathlib import Path
 from fastapi import UploadFile
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 from app.config import get_settings
 from app.errors import AppError
 
@@ -35,6 +35,7 @@ def validate_image(data: bytes) -> tuple[bytes, int, int, str, str]:
                 raise AppError(413, "IMAGE_TOO_LARGE", "图片像素超过上限")
             probe.verify()
         with Image.open(io.BytesIO(data)) as image:
+            image = ImageOps.exif_transpose(image)
             width, height = image.size
             output = io.BytesIO()
             # Conversion copies image.info in Pillow; clear it explicitly so PNG
@@ -53,7 +54,7 @@ def validate_image(data: bytes) -> tuple[bytes, int, int, str, str]:
             return encoded, width, height, mime, suffix
     except (Image.DecompressionBombError, Image.DecompressionBombWarning):
         raise AppError(413, "IMAGE_TOO_LARGE", "图片像素超过上限") from None
-    except (UnidentifiedImageError, OSError, ValueError):
+    except (UnidentifiedImageError, OSError, ValueError, SyntaxError):
         raise AppError(415, "INVALID_IMAGE", "图片无法解码") from None
 
 

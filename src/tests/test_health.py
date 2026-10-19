@@ -7,8 +7,8 @@ from app.main import app
 
 
 def test_health(monkeypatch):
-    monkeypatch.delenv("BAIDU_API_KEY", raising=False)
-    monkeypatch.delenv("BAIDU_SECRET_KEY", raising=False)
+    monkeypatch.setenv("BAIDU_API_KEY", "")
+    monkeypatch.setenv("BAIDU_SECRET_KEY", "")
     get_settings.cache_clear()
     with TestClient(app) as client:
         result = client.get("/api/health").json()

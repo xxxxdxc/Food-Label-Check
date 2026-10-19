@@ -6,10 +6,10 @@ from app.schemas.contract import CorrectionsRequest, Evidence
 
 def test_contract_routes_and_review_payload():
     schema = app.openapi()
-    assert len(schema["paths"]) == 15
+    assert {"/api/audits/{audit_id}/claim-prechecks", "/api/audits/{audit_id}/claim-prechecks/retry"} <= schema["paths"].keys()
     assert schema["paths"]["/api/audits/{audit_id}/corrections"]["post"]["requestBody"]
-    assert schema["paths"]["/api/audits"]["get"]["security"]
-    assert not schema["paths"]["/api/auth/login"]["post"].get("security")
+    assert not schema["paths"]["/api/audits"]["get"].get("security")
+    assert "/api/auth/login" not in schema["paths"]
     report_media = schema["paths"]["/api/audits/{audit_id}/report"]["get"]["responses"]["200"]["content"]
     assert {"application/json", "text/html"} <= set(report_media)
 

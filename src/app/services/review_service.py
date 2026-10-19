@@ -11,6 +11,7 @@ from app.errors import AppError
 from app.services.audit_service import append_document, current_document
 from app.services.projection import project_review_items
 from app.services.storage import file_path
+from app.services.table_association import associate_review_tables, table_refs
 
 
 def pending(doc):
@@ -26,7 +27,7 @@ def apply_corrections(db, task, body):
     file = db.get(File, body.image_id)
     if file is None or file.task_id != task.id:
         raise AppError(404, "FILE_NOT_FOUND", "原图不存在")
-    doc = current_document(db, task)
+    doc = associate_review_tables(current_document(db, task))
     image = next((i for i in doc["images"] if i["id"] == body.image_id), None)
     data = file_path(file).read_bytes()
     if (not image or image["fileName"] != body.image_name or body.document_id != doc["documentId"]
@@ -44,10 +45,22 @@ def apply_corrections(db, task, body):
     try:
         updated = copy.deepcopy(doc)
         if body.decisions or body.table_decisions:
-            updated = to_dict(apply_decisions(document_from_dict(doc), data, decisions))
+            engine_doc, engine_decisions = prepare_engine_decisions(doc, decisions, queue, image)
+            updated = to_dict(apply_decisions(document_from_dict(engine_doc), data, engine_decisions))
+            from audit_engine.label_check.review.apply import _field_at_path
+            from app.services.vision_client import _replace_path
+            for row in body.decisions:
+                original = _field_at_path(document_from_dict(doc), row.path)
+                field = to_dict(_field_at_path(document_from_dict(updated), row.path))
+                field["sourceRefs"] = list(dict.fromkeys([*original.sourceRefs, *field["sourceRefs"]]))
+                _replace_path(updated, row.path, field)
+            if "_platform" in doc:
+                updated["_platform"] = copy.deepcopy(doc["_platform"])
         for table in body.manual_tables:
             updated = manual_table(updated, table, image)
-        if not (body.decisions or body.table_decisions or body.manual_tables):
+        if body.no_table_images:
+            updated = confirm_no_table(updated, body, image)
+        if not (body.decisions or body.table_decisions or body.manual_tables or body.no_table_images):
             raise ValueError("没有复核决定")
         validate_document(document_from_dict(updated))
     except (ValueError, KeyError, TypeError) as exc:
@@ -59,8 +72,60 @@ def apply_corrections(db, task, body):
                       decisions_json=json.dumps(decisions, ensure_ascii=False)))
 
 
+def prepare_engine_decisions(doc, decisions, queue, image):
+    from audit_engine.label_check.review.apply import _field_at_path
+    from app.services.vision_client import _replace_path
+    engine_doc, payload = copy.deepcopy(doc), copy.deepcopy(decisions)
+    pending_items = {item["path"]: item for item in queue["items"]}
+    evidence = {e["id"]: e for e in doc["evidence"]}
+    for row in payload["decisions"]:
+        item = pending_items[row["path"]]
+        if (row["originalRaw"] != item["raw"] or row["originalValue"] != item["value"]
+                or row["originalUnit"] != item["unit"]
+                or row["sourceEvidenceRefs"] != [e.id for e in item["evidence"]]):
+            raise ValueError("复核原值或证据已变化")
+        field = to_dict(_field_at_path(document_from_dict(engine_doc), row["path"]))
+        images = {evidence[r]["imageId"] for r in field["sourceRefs"] if evidence[r]["imageId"] is not None}
+        if row["path"] in {"facts.productName", "facts.netContent", "facts.ingredientsText", "facts.allergenText"} and len(images) > 1:
+            if image["id"] not in images:
+                raise ValueError("冲突字段不属于当前原图")
+            field["sourceRefs"] = [r for r in field["sourceRefs"] if evidence[r]["imageId"] in {image["id"], None}]
+            _replace_path(engine_doc, row["path"], field)
+        row["sourceEvidenceRefs"] = field["sourceRefs"]
+    return engine_doc, payload
+
+
+def confirm_no_table(doc, body, image):
+    # An image-bound request may only resolve its own image-wide missing-table
+    # diagnostic. Existing detected tables must be reviewed, never deleted here.
+    if body.no_table_images != [image["id"]]:
+        raise ValueError("无营养表确认只能提交当前原图，且不得重复")
+    if body.manual_tables or body.table_decisions:
+        raise ValueError("无营养表确认不能同时录入或确认营养表")
+    evidence = {e["id"]: e for e in doc["evidence"]}
+    for table in doc["facts"]["nutritionTables"]:
+        refs = [*table.get("sourceRefs", []), *table["basis"]["sourceRefs"]]
+        for row in table["rows"]:
+            for field in (row["nutrient"], row["amount"], row.get("nrvPercent")):
+                if field:
+                    refs.extend(field["sourceRefs"])
+        if any(evidence[r]["imageId"] == image["id"] for r in refs):
+            raise ValueError("当前图片已有营养表，不能声明无表")
+    diagnostics = [d for d in doc.get("tableDiagnostics", [])
+                   if d["imageId"] == image["id"] and d["status"] != "ok"]
+    if not diagnostics or any(d.get("tableId") is not None for d in diagnostics):
+        raise ValueError("没有可确认无表的待复核诊断")
+    identifier = "manual-no-table:" + str(len(doc["evidence"]) + 1)
+    doc["evidence"].append({"id": identifier, "imageId": None, "sourceType": "manual",
+                            "text": "人工确认本图无营养表", "boxPx": None, "ocrConfidence": None})
+    for diagnostic in diagnostics:
+        diagnostic.update(status="ok", code="HUMAN_CONFIRMED_NO_TABLE", message="人工确认本图无营养表")
+        diagnostic["evidenceRefs"] = [*diagnostic["evidenceRefs"], identifier]
+    return doc
+
+
 def manual_table(doc, table, image):
-    doc = copy.deepcopy(doc)
+    doc = associate_review_tables(doc)
     diagnostic = next((d for d in doc.get("tableDiagnostics", [])
                        if d["status"] != "ok" and d["imageId"] == image["id"]
                        and d.get("tableId") in {table.table_id, None}
@@ -71,6 +136,11 @@ def manual_table(doc, table, image):
     old = next((t for t in doc["facts"]["nutritionTables"] if t["id"] == table.table_id), None)
     if old and diagnostic.get("tableId") != old["id"]:
         raise ValueError("不能覆盖另一张表")
+    if old is None and any(
+        any(e["id"] in table_refs(existing) and e["imageId"] == image["id"] for e in doc["evidence"])
+        for existing in doc["facts"]["nutritionTables"]
+    ):
+        raise ValueError("当前图片已有候选营养表，请使用原表 ID 调整结构，不能新增重复表")
     if table.basis == "per_serving" and (not table.serving_g or Decimal(table.serving_g) <= 0):
         raise ValueError("每份基准需要大于0的 serving_g")
     box = table.box_px.model_dump() if table.box_px else diagnostic.get("boxPx")

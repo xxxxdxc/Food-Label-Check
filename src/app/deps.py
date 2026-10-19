@@ -1,6 +1,7 @@
 """Signed shared sessions, request limits and short database scopes."""
 import hashlib
 import hmac
+import ipaddress
 import time
 from collections import OrderedDict, deque
 from threading import Lock
@@ -33,6 +34,17 @@ def require_session(token: str | None = Depends(session_cookie), settings: Setti
         valid = False
     if not valid:
         raise AppError(401, "UNAUTHORIZED", "请先登录")
+
+
+def require_access(request: Request, settings: Settings = Depends(get_settings)) -> None:
+    if not settings.local_only:
+        return require_session(request.cookies.get("session"), settings)
+    try:
+        local = request.client is not None and ipaddress.ip_address(request.client.host).is_loopback
+    except ValueError:
+        local = False
+    if not local or request.url.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        raise AppError(403, "LOCAL_ONLY", "工作台仅允许本机访问，请使用 127.0.0.1 或 localhost")
 
 
 def rate_limit(request: Request, scope: str, limit: int, seconds: int, record=True) -> None:

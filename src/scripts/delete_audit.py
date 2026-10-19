@@ -6,6 +6,7 @@ import uuid
 from sqlalchemy import delete, select
 from app.config import get_settings
 from app.db import CheckRun, Correction, Document, File, Issue, IssueDecision, Job, Task, init_db
+from app.db import ClaimPrecheck, ClaimPrecheckAttempt, ClaimPrecheckValidation
 from app.deps import begin_write
 from app.errors import AppError
 from app.services.audit_service import get_task
@@ -23,6 +24,8 @@ def delete_audit(task_id, confirm=None):
         task = get_task(db, task_id)
         if db.scalar(select(Job.id).where(Job.task_id == task_id, Job.status == "running")):
             raise AppError(409, "JOB_RUNNING", "请先停止 Worker，等待任务锁恢复后再删除")
+        if db.scalar(select(ClaimPrecheck.id).where(ClaimPrecheck.task_id == task_id, ClaimPrecheck.status == "running")):
+            raise AppError(409, "JOB_RUNNING", "模型初审正在运行，请等待结束后再删除")
         raw_root = (root / "ocr" / task_id).resolve()
         if raw_root.parent != (root / "ocr").resolve() or not raw_root.is_relative_to(root):
             raise ValueError("OCR 目录不在 DATA_DIR 内")
@@ -38,6 +41,11 @@ def delete_audit(task_id, confirm=None):
         if confirm is None:
             return result
         # Delete children first; foreign-key checks remain enabled.
+        db.execute(delete(ClaimPrecheckValidation).where(ClaimPrecheckValidation.batch_id.in_(
+            select(ClaimPrecheck.id).where(ClaimPrecheck.task_id == task_id))))
+        db.execute(delete(ClaimPrecheckAttempt).where(ClaimPrecheckAttempt.batch_id.in_(
+            select(ClaimPrecheck.id).where(ClaimPrecheck.task_id == task_id))))
+        db.execute(delete(ClaimPrecheck).where(ClaimPrecheck.task_id == task_id))
         for model in (IssueDecision, Issue, CheckRun, Correction, Document, Job, File):
             db.execute(delete(model).where(model.task_id == task_id))
         db.execute(delete(Task).where(Task.id == task_id))

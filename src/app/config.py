@@ -21,8 +21,9 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    access_passcode: str
-    session_secret: str
+    local_only: bool = True
+    access_passcode: str = ""
+    session_secret: str = ""
     baidu_api_key: str | None = None
     baidu_secret_key: str | None = None
     data_dir: Path = SRC_ROOT / "data"
@@ -34,21 +35,22 @@ class Settings(BaseSettings):
     vlm_model: str = ""
     vlm_api_key: str = ""
     vlm_timeout_s: float = Field(default=60, gt=0, le=120)
-    daily_vlm_limit: int = Field(default=20, ge=0)
+    daily_vlm_limit: int = Field(default=100, ge=0)
+    claim_precheck_enabled: bool = True
+    claim_precheck_model: str = "gpt-6.1-sol"
+    daily_claim_precheck_limit: int = Field(default=10, ge=0)
     worker_poll_s: float = Field(default=1, gt=0, le=30)
     frontend_dist: Path = PROJECT_ROOT / "frontend" / "dist"
 
-    @field_validator("access_passcode", "session_secret")
-    @classmethod
-    def reject_blank_secrets(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("must not be empty")
-        return value
-
     @model_validator(mode="after")
     def validate_vision(self):
-        if self.vlm_enabled and not (self.vlm_api_key and self.vlm_model and self.vlm_base_url.startswith("https://")):
+        if not self.local_only and (not self.access_passcode.strip() or not self.session_secret.strip()):
+            raise ValueError("Authenticated deployments require ACCESS_PASSCODE and SESSION_SECRET")
+        if (self.vlm_enabled or self.ocr_mode == "live") and not (
+                self.vlm_api_key.strip() and self.vlm_model.strip() and self.vlm_base_url.startswith("https://")):
             raise ValueError("VLM_ENABLED requires an HTTPS VLM_BASE_URL, VLM_MODEL and VLM_API_KEY")
+        if self.ocr_mode == "live":
+            self.vlm_enabled = True
         return self
 
     @property

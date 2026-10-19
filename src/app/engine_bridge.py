@@ -11,6 +11,12 @@ SCOPE = ("GB 28050-2025 新版预检（2027-03-16 起实施）；"
          "仅对已提供数据初检，覆盖范围有限，不等同人工签核。")
 BASIC = {"food_name": ("productName", "食品名称"), "net_content": ("netContent", "净含量"),
          "ingredients_text": ("ingredientsText", "配料表")}
+CLAIM_ALIASES = {"高蛋白": "high_protein", "富含蛋白质": "high_protein", "高纤维": "high_fiber",
+                 "富含膳食纤维": "high_fiber", "低糖": "low_sugar", "无糖": "sugar_free"}
+
+
+def claim_rule_key(value):
+    return CLAIM_ALIASES.get(value, value)
 
 
 def refs(*fields):
@@ -89,9 +95,7 @@ def checker_input(document: dict, revision: str, channel: str | None = None):
             continue
         text = claim["text"]
         if ready(text):
-            mapped = {"高蛋白": "high_protein", "富含蛋白质": "high_protein", "高纤维": "high_fiber",
-                      "富含膳食纤维": "high_fiber", "低糖": "low_sugar", "无糖": "sugar_free"}
-            payload["claims"].append(mapped.get(text["value"], text["value"]))
+            payload["claims"].append(claim_rule_key(text["value"]))
         else:
             gates.append(finding("L3", "NOT_CHECKED", "OCR-CLAIM-GATE", "声称文字待复核", "input",
                                  [{"source_refs": refs(text)}]))
@@ -184,6 +188,14 @@ def check(document: dict, revision: str, channel: str | None = None, store=None)
                                           "供能输入未全部确认，能量算式未检查", "input"))
     output["findings"].extend(gate["findings"])
     output["findings"].extend(packaging_findings(document))
+    uncovered = iter(c for c in document["facts"].get("claims", []) if c["category"] != "front_title"
+                     and ready(c["text"]) and claim_rule_key(c["text"]["value"]) not in load_policy()["claims"])
+    for item in output["findings"]:
+        if item["rule_id"] == "CLAIM-UNKNOWN":
+            claim = next(uncovered)
+            item["claim_id"] = claim["id"]
+            item["evidence"] = [{"source_refs": claim["text"]["sourceRefs"]}]
+            item["message"] = "声称“" + claim["text"]["value"] + "”已识别，当前固定规则未覆盖。"
     output["scope"] = SCOPE
     output["status"] = "FAIL" if any(f["status"] == "FAIL" for f in output["findings"]) else "REVIEW"
     output["human_queue"] = [f for f in output["findings"] if f["status"] in {"REVIEW", "NOT_CHECKED"}]

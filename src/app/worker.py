@@ -4,11 +4,11 @@ import json
 import logging
 import time
 from datetime import timedelta
+from dataclasses import dataclass
 from threading import Event, Thread
 
 from sqlalchemy import select, text, update
-from audit_engine.label_check.shared import document_from_dict, to_dict, validate_document
-from audit_engine.label_check.ocr.dual import parse_dual
+from audit_engine.label_check.shared import document_from_dict, validate_document
 from audit_engine.label_check_v2.channel import ChannelStore
 from app.config import get_settings
 from app.db import CheckRun, Document, Issue, Job, RuleClause, Task, init_db, utcnow
@@ -19,9 +19,15 @@ from app.services.ocr_client import BaiduClient, ServiceError
 from app.services.projection import project_issues
 from app.services.review_service import pending
 from app.services.samples import SAMPLE_ROOT, bind_document, merge_documents
-from app.services.storage import file_path
 
 log = logging.getLogger("food_label_worker")
+
+
+@dataclass
+class Extraction:
+    document: dict
+    vision_document: dict | None
+    warnings: list
 
 
 def recover_jobs():
@@ -73,36 +79,32 @@ def save_check(db, task, document, version, result):
         db.add(Issue(task_id=task.id, check_run_id=row.id, issue_json=item.model_dump_json()))
     task.check_doc_version = version
     task.summary_json = json.dumps({s: sum(i.status == s for i in issues) for s in ("PASS", "FAIL", "REVIEW", "NOT_CHECKED")})
+    # Independent queue: scheduling failure must not roll back deterministic checks.
+    try:
+        from app.services.claim_precheck import schedule
+        with db.begin_nested():
+            schedule(db, task, document, version)
+    except Exception as exc:
+        log.error("claim precheck scheduling unavailable: %s", type(exc).__name__)
     return any(i.status == "NOT_CHECKED" for i in issues)
 
 
 def extract(task, client):
     settings = get_settings()
-    docs = []
+    docs, warnings = [], []
     for file in task.files:
         if task.source == "sample":
             doc = json.loads((SAMPLE_ROOT / (task.sample_id + ".json")).read_text(encoding="utf-8"))
         else:
             if settings.ocr_mode != "live":
                 raise ServiceError("CACHE_MODE", "缓存模式无法识别新上传图片")
-            raw_root = settings.data_dir / "ocr" / task.id
-            raw_root.mkdir(parents=True, exist_ok=True)
-            responses = {}
-            for kind in ("accurate", "table"):
-                path = raw_root / (file.id + "." + kind + ".json")
-                if path.is_file():
-                    responses[kind] = json.loads(path.read_text(encoding="utf-8"))
-                else:
-                    responses[kind] = client.recognize(file_path(file).read_bytes(), kind)
-                    staging = path.with_suffix(".tmp")
-                    staging.write_text(json.dumps(responses[kind], ensure_ascii=False), encoding="utf-8")
-                    staging.replace(path)
-            doc = to_dict(parse_dual(file_path(file), responses["accurate"], responses["table"], task.id,
-                                     image_id=file.id, expect_nutrition_table=True))
+            from app.services.regional_ocr import extract_file
+            doc, file_warnings = extract_file(task, file, client)
+            warnings.extend(file_warnings)
         docs.append(bind_document(doc, task.id, file))
     document = merge_documents(docs)
     validate_document(document_from_dict(document))
-    return document
+    return Extraction(document, None, warnings)
 
 
 def run_one(client=None):
@@ -122,20 +124,14 @@ def run_one(client=None):
             db.commit()
             files = list(task.files)
             if kind == "extract":
-                document = extract(task, client or BaiduClient())
+                extracted = extract(task, client or BaiduClient())
+                document = extracted.document if isinstance(extracted, Extraction) else extracted
             else:
                 document = current_document(db, task)
             version, channel = task.document_version, task.channel
-        warning = None
-        vision_document = None
+        warnings = extracted.warnings if kind == "extract" and isinstance(extracted, Extraction) else []
+        vision_document = extracted.vision_document if kind == "extract" and isinstance(extracted, Extraction) else None
         if kind == "extract":
-            if (get_settings().vlm_enabled and len(files) == 1 and task.source != "sample"
-                    and any(d["status"] == "needs_vision" for d in document.get("tableDiagnostics", []))):
-                from app.services.vision_client import propose_tables
-                try:
-                    vision_document = propose_tables(document, file_path(files[0]).read_bytes())
-                except ServiceError as exc:
-                    warning = exc.as_dict()
             with init_db()() as db:
                 begin_write(db)
                 task = db.get(Task, task_id)
@@ -147,7 +143,8 @@ def run_one(client=None):
                 document = current_document(db, task)
                 version = task.document_version
                 task.review_pending = pending(document)
-                task.error_json = json.dumps(warning, ensure_ascii=False) if warning else None
+                task.error_json = None
+                task.warnings_json = json.dumps(warnings, ensure_ascii=False)
                 if task.review_pending == 0:
                     job = db.get(Job, job_id)
                     job.status, job.locked_at = "done", None
@@ -203,6 +200,11 @@ def main():
     logging.basicConfig(level=logging.INFO)
     get_settings()
     client = BaiduClient()
+    claim_stop = Event()
+    if not args.once:
+        from app.claim_worker import run_forever
+        init_db()
+        Thread(target=run_forever, args=(claim_stop,), daemon=True).start()
     try:
         while True:
             worked = run_one(client)
@@ -212,6 +214,8 @@ def main():
                 time.sleep(get_settings().worker_poll_s)
     except KeyboardInterrupt:
         pass
+    finally:
+        claim_stop.set()
 
 
 if __name__ == "__main__":

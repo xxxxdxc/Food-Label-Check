@@ -21,6 +21,7 @@ def test_exhausted_ocr_budget_returns_429_without_files_or_task(client, monkeypa
     monkeypatch.setenv("DAILY_OCR_LIMIT", "2")
     get_settings.cache_clear()
     reserve_usage("ocr", 2)
+    reserve_usage("ocr", 2)
     from tests.helpers import image_bytes
     response = client.post("/api/audits", files={"files": ("label.png", image_bytes(), "image/png")})
     assert response.status_code == 429 and response.json()["error"]["code"] == "OCR_QUOTA"
@@ -76,12 +77,18 @@ def test_vision_worker_preserves_v0_and_exposes_both_sources(client, monkeypatch
     monkeypatch.setenv("VLM_API_KEY", "fake-test-key")
     monkeypatch.setenv("VLM_MODEL", "fake-model")
     get_settings.cache_clear()
-    monkeypatch.setattr("app.worker.extract", lambda task, _: bind_document(structural_doc(), task.id, task.files[0]))
     def propose(doc, image):
         candidate = proposals()
         candidate["tables"][0]["tableId"] = doc["facts"]["nutritionTables"][0]["id"]
         return import_candidates(doc, image, candidate)
-    monkeypatch.setattr("app.services.vision_client.propose_tables", propose)
+    # Import a historical two-version result explicitly; the new worker must
+    # retain that history but must never call the legacy transcription path.
+    from app.worker import Extraction
+    from tests.helpers import image_bytes
+    def historical(task, _):
+        original = bind_document(structural_doc(), task.id, task.files[0])
+        return Extraction(original, propose(original, image_bytes()), [])
+    monkeypatch.setattr("app.worker.extract", historical)
     task = create_upload(client)
     assert run_one()
     prefix = "/api/audits/" + task["id"]
