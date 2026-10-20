@@ -63,3 +63,33 @@ def test_retry_is_bounded_and_does_not_retry_exhausted_quota(monkeypatch, clock,
         ocr.BaiduClient().recognize(b"image", "accurate")
     assert len(calls) == expected_attempts
     assert caught.value.retryable is (error == 18)
+
+
+def test_budget_error_reports_exact_shared_usage_and_raising_limit_preserves_it(monkeypatch):
+    from app.config import get_settings
+    from app.errors import AppError
+    monkeypatch.setenv("DAILY_OCR_LIMIT", "3")
+    get_settings.cache_clear()
+    ocr.reserve_usage("ocr", 3)
+    ocr.reserve_usage("ocr", 3)
+    with init_db()() as db:
+        with pytest.raises(AppError) as caught:
+            ocr.require_ocr_capacity(db, 4)
+        assert caught.value.code == "OCR_BUDGET"
+        message = str(caught.value.detail)
+        for text in ["上限为 3 次", "已用 2 次", "剩余 1 次", "需要 4 次", "08:00", "不代表百度"]:
+            assert text in message
+    monkeypatch.setenv("DAILY_OCR_LIMIT", "1000")
+    get_settings.cache_clear()
+    with init_db()() as db:
+        ocr.require_ocr_capacity(db, 4)
+        day = datetime.now(timezone.utc).date().isoformat()
+        assert db.get(Usage, (day, "ocr")).count == 2
+
+
+def test_exhausted_internal_budget_has_a_retryable_separate_code():
+    ocr.reserve_usage("ocr", 1)
+    with pytest.raises(ocr.ServiceError) as caught:
+        ocr.reserve_usage("ocr", 1)
+    assert caught.value.code == "OCR_BUDGET" and caught.value.retryable
+    assert "已用 1 次" in caught.value.message and "剩余 0 次" in caught.value.message

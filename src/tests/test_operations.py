@@ -24,7 +24,7 @@ def test_exhausted_ocr_budget_returns_429_without_files_or_task(client, monkeypa
     reserve_usage("ocr", 2)
     from tests.helpers import image_bytes
     response = client.post("/api/audits", files={"files": ("label.png", image_bytes(), "image/png")})
-    assert response.status_code == 429 and response.json()["error"]["code"] == "OCR_QUOTA"
+    assert response.status_code == 429 and response.json()["error"]["code"] == "OCR_BUDGET"
     assert client.get("/api/audits").json()["total"] == 0
     assert not list((get_settings().data_dir / "uploads").glob("*"))
     assert client.post("/api/audits", data={"source": "sample", "sample_id": "4260290260010"}).status_code == 201

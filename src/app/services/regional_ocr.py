@@ -243,8 +243,10 @@ def extract_file(task, file, client):
         if remaining:
             with init_db()() as db:
                 require_ocr_capacity(db, remaining)
-    except AppError:
-        raise ServiceError("OCR_QUOTA", "分区后实际需要的 OCR 调用数超过今日剩余额度，请稍后重试", True) from None
+    except AppError as exc:
+        if exc.code != "OCR_BUDGET":
+            raise
+        raise ServiceError(exc.code, str(exc.detail), True) from None
     lines, tables, seen = [], [], {}
     for unit, encoded, transform, kind, identity, response_path in prepared:
         if response_path.is_file():

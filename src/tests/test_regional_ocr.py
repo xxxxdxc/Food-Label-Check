@@ -246,7 +246,10 @@ def test_exact_region_quota_is_checked_before_any_ocr_call(tmp_path, monkeypatch
     events = []
     with pytest.raises(ServiceError) as caught:
         extract_file(task, file, OCR(events))
-    assert caught.value.code == "OCR_QUOTA" and events == []
+    assert caught.value.code == "OCR_BUDGET" and events == []
+    assert caught.value.retryable
+    for part in ["上限为 3 次", "已用 0 次", "剩余 3 次", "需要 4 次"]:
+        assert part in caught.value.message
 
 
 def test_invalid_confidence_is_rejected_instead_of_coerced():

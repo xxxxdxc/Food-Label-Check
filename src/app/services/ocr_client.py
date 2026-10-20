@@ -24,11 +24,19 @@ class ServiceError(Exception):
         return {"code": self.code, "message": self.message, "retryable": self.retryable}
 
 
+def ocr_budget_message(limit, used, required):
+    return (f"本站 OCR 每日调用上限为 {limit} 次，已用 {used} 次，剩余 {max(0, limit - used)} 次，"
+            f"本次至少需要 {required} 次；全空间访客共享，北京时间每天 08:00 重置。"
+            "这是本站调用预算，不代表百度 OCR 额度已耗尽。")
+
+
 def require_ocr_capacity(db, calls):
     day = datetime.now(timezone.utc).date().isoformat()
     usage = db.get(Usage, (day, "ocr"))
-    if (usage.count if usage else 0) + calls > get_settings().daily_ocr_limit:
-        raise AppError(429, "OCR_QUOTA", "剩余每日 OCR 调用额度不足，请稍后再试")
+    used = usage.count if usage else 0
+    limit = get_settings().daily_ocr_limit
+    if used + calls > limit:
+        raise AppError(429, "OCR_BUDGET", ocr_budget_message(limit, used, calls))
 
 
 def reserve_usage(service, limit):
@@ -38,6 +46,8 @@ def reserve_usage(service, limit):
         count = db.execute(text("SELECT count FROM daily_usage WHERE day=:day AND service=:service"),
                            {"day": day, "service": service}).scalar() or 0
         if count >= limit:
+            if service == "ocr":
+                raise ServiceError("OCR_BUDGET", ocr_budget_message(limit, count, 1), True)
             raise ServiceError(service.upper() + "_QUOTA", "已达到服务每日调用上限")
         db.execute(text("INSERT INTO daily_usage(day,service,count) VALUES (:day,:service,1) "
                         "ON CONFLICT(day,service) DO UPDATE SET count=count+1"), {"day": day, "service": service})

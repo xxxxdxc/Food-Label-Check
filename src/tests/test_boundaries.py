@@ -128,7 +128,7 @@ def test_multimage_review_is_bound_to_the_correct_image(client, monkeypatch):
     assert client.get(prefix + "/issues?rule_id=OCR-DOWNSTREAM-GATE").json()[0]["status"] == "NOT_CHECKED"
 
 
-@pytest.mark.parametrize("code,retryable", [("OCR_AUTH", False), ("OCR_QUOTA", False), ("OCR_RATE_LIMIT", True), ("OCR_TIMEOUT", True)])
+@pytest.mark.parametrize("code,retryable", [("OCR_AUTH", False), ("OCR_QUOTA", False), ("OCR_BUDGET", True), ("OCR_RATE_LIMIT", True), ("OCR_TIMEOUT", True)])
 def test_ocr_failures_are_classified_and_timeout_retries_only_once(client, monkeypatch, code, retryable):
     class Client:
         def recognize(self, *_args):
@@ -148,7 +148,7 @@ def test_daily_budget_is_persistent_across_sessions():
     reserve_usage("ocr", 1)
     with pytest.raises(ServiceError) as caught:
         reserve_usage("ocr", 1)
-    assert caught.value.code == "OCR_QUOTA"
+    assert caught.value.code == "OCR_BUDGET"
 
 
 def test_real_parser_path_saves_raw_responses_and_structural_review(client):

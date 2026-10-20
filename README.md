@@ -22,3 +22,5 @@ frontend/   前端（React + TypeScript + Vite）
 在创空间设置的**私密变量**中配置 `BAIDU_API_KEY`、`BAIDU_SECRET_KEY`、`VLM_API_KEY`、`VLM_BASE_URL`、`VLM_MODEL`、`CLAIM_PRECHECK_MODEL`，以及随机生成的至少 32 字符 `SESSION_SECRET`。不要把 `.env` 或访问令牌推送到仓库。
 
 运行设置：`PUBLIC_ACCESS=1`、`LOCAL_ONLY=0`、`OCR_MODE=live`、`VLM_ENABLED=1`、`DATA_DIR=/app/runtime`；`ALLOWED_ORIGINS` 设置为公开应用域名的 JSON 数组。公开访问无需登录，任务通过签名 HttpOnly Cookie 按访客隔离；清除 Cookie 后无法找回该访客任务。运行目录随平台容器生命周期管理，重建前应导出需要保留的结果。
+
+魔搭演示在私密变量中明确设置 `DAILY_OCR_LIMIT=1000`。该上限为全空间访客合计的 OCR 请求尝试次数（含重试），与百度各接口实际额度独立，按 UTC 日期计数，即北京时间每日 08:00 重置。分区数量决定一次上传所需的调用数，超出本站预算时返回 `OCR_BUDGET`，显示上限、已用、剩余和本次所需；百度额度耗尽仍为 `OCR_QUOTA`，频率限制为 `OCR_RATE_LIMIT`。提高配置不清零现有数据库计数。
