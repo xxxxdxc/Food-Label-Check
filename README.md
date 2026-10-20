@@ -24,3 +24,5 @@ frontend/   前端（React + TypeScript + Vite）
 运行设置：`PUBLIC_ACCESS=1`、`LOCAL_ONLY=0`、`OCR_MODE=live`、`VLM_ENABLED=1`、`DATA_DIR=/app/runtime`；`ALLOWED_ORIGINS` 设置为公开应用域名的 JSON 数组。公开访问无需登录，任务通过签名 HttpOnly Cookie 按访客隔离；清除 Cookie 后无法找回该访客任务。运行目录随平台容器生命周期管理，重建前应导出需要保留的结果。
 
 魔搭演示在私密变量中明确设置 `DAILY_OCR_LIMIT=1000`。该上限为全空间访客合计的 OCR 请求尝试次数（含重试），与百度各接口实际额度独立，按 UTC 日期计数，即北京时间每日 08:00 重置。分区数量决定一次上传所需的调用数，超出本站预算时返回 `OCR_BUDGET`，显示上限、已用、剩余和本次所需；百度额度耗尽仍为 `OCR_QUOTA`，频率限制为 `OCR_RATE_LIMIT`。提高配置不清零现有数据库计数。
+
+图片分区使用独立的 `ZONING_TIMEOUT_S=300`（魔搭私密变量），包含预处理、连接/上传、模型处理、读取响应及校验，达到 5 分钟即取消等待并返回 `ZONING_TIMEOUT`，继续既有的整图 OCR 降级流程。每张图最多一次分区请求，不自动重试延长等待；后续百度 OCR 不计入这 5 分钟。其它模型调用继续使用原 `VLM_TIMEOUT_S`。

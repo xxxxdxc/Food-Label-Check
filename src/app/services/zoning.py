@@ -1,10 +1,13 @@
 """VLM supplies layout only. Never accept model-transcribed label text."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import json
 import math
+import logging
+import time
 from typing import Literal
 
 from PIL import Image
@@ -12,6 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import get_settings
 from app.services.ocr_client import ServiceError, reserve_usage
+
+log = logging.getLogger("food_label_zoning")
 
 PIPELINE = "vlm_zones_ocr_v1"
 RegionKind = Literal["product_name", "net_content", "ingredients", "allergens",
@@ -49,11 +54,30 @@ def validate_layout(payload, width, height):
     return layout.model_dump()
 
 
-def propose_regions(image_bytes):
-    """One bounded call; any failure is handled by the whole-image OCR fallback."""
+async def _request_regions(settings, prompt, image_base64, generation, deadline):
     import httpx
-    from openai import OpenAI, OpenAIError, APITimeoutError
+    from openai import AsyncOpenAI
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError
+    # A socket read timeout alone restarts for every received chunk. This outer
+    # deadline also covers connection/upload, upstream work and the whole body.
+    async with asyncio.timeout(remaining):
+        async with AsyncOpenAI(base_url=settings.vlm_base_url, api_key=settings.vlm_api_key,
+                timeout=remaining, max_retries=0,
+                http_client=httpx.AsyncClient(follow_redirects=False)) as client:
+            reserve_usage("vlm", settings.daily_vlm_limit)
+            return await client.chat.completions.create(model=settings.vlm_model, **generation,
+                messages=[{"role": "user", "content": [{"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + image_base64}}]}])
+
+
+def propose_regions(image_bytes):
+    """One request within the per-image deadline; failures use whole-image OCR."""
+    from openai import OpenAIError, APITimeoutError
+    started = time.monotonic()
     settings = get_settings()
+    deadline = started + settings.zoning_timeout_s
     if not settings.vlm_enabled:
         raise ServiceError("ZONING_DISABLED", "视觉分区未启用")
     with Image.open(io.BytesIO(image_bytes)) as image:
@@ -77,14 +101,10 @@ def propose_regions(image_bytes):
     generation = ({"max_completion_tokens": 4000, "reasoning_effort": "low"}
                   if settings.vlm_model.startswith("gpt-6") else {"max_tokens": 4000, "temperature": 0})
     try:
-        with OpenAI(base_url=settings.vlm_base_url, api_key=settings.vlm_api_key,
-                    timeout=settings.vlm_timeout_s, max_retries=0,
-                    http_client=httpx.Client(follow_redirects=False)) as client:
-            reserve_usage("vlm", settings.daily_vlm_limit)
-            response = client.chat.completions.create(model=settings.vlm_model, **generation,
-                messages=[{"role": "user", "content": [{"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," +
-                        base64.b64encode(output.getvalue()).decode()}}]}])
+        response = asyncio.run(_request_regions(settings, prompt,
+            base64.b64encode(output.getvalue()).decode(), generation, deadline))
+        if time.monotonic() >= deadline:
+            raise TimeoutError
         content = response.choices[0].message.content
         if not content or len(content) > 100_000:
             raise ValueError("分区响应为空或过大")
@@ -95,10 +115,19 @@ def propose_regions(image_bytes):
                 box[key] *= original[0] / width
             for key in ("top", "height"):
                 box[key] *= original[1] / height
-        return validate_layout(payload, *original)
+        result = validate_layout(payload, *original)
+        if time.monotonic() >= deadline:
+            raise TimeoutError
+        return result
+    except (TimeoutError, APITimeoutError) as exc:
+        log.warning("zoning timeout elapsed_s=%.2f budget_s=%s exception=%s",
+                    time.monotonic() - started, settings.zoning_timeout_s, type(exc).__name__)
+        raise ServiceError("ZONING_TIMEOUT",
+            f"视觉分区请求超时（最多等待 {settings.zoning_timeout_s:g} 秒），已改用整图 OCR") from None
     except OpenAIError as exc:
-        code = "ZONING_TIMEOUT" if isinstance(exc, APITimeoutError) else "ZONING_API_ERROR"
-        raise ServiceError(code, "视觉分区请求失败，已改用整图 OCR") from None
+        log.warning("zoning API error elapsed_s=%.2f http_status=%s exception=%s",
+                    time.monotonic() - started, getattr(exc, "status_code", None), type(exc).__name__)
+        raise ServiceError("ZONING_API_ERROR", "视觉分区请求失败，已改用整图 OCR") from None
     except (ValueError, KeyError, TypeError, IndexError):
         raise ServiceError("ZONING_INVALID", "视觉分区无效，已改用整图 OCR") from None
 

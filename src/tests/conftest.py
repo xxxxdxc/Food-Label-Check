@@ -20,6 +20,7 @@ def configured_app(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("OCR_MODE", "cache")
     monkeypatch.setenv("VLM_ENABLED", "0")
+    monkeypatch.setenv("ZONING_TIMEOUT_S", "300")
     monkeypatch.setenv("VLM_MODEL", "test-model")
     monkeypatch.setenv("VLM_API_KEY", "test-key")
     monkeypatch.setenv("VLM_BASE_URL", "https://api.example.test/v1")

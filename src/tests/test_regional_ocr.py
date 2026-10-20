@@ -197,11 +197,11 @@ def test_zoning_sdk_asks_for_regions_only_and_returns_original_coordinates(monke
         assert "raw/value" in body["messages"][0]["content"][0]["text"]
         return httpx.Response(200, json={"id": "offline", "object": "chat.completion", "created": 1,
             "model": "test", "choices": [{"index": 0, "message": {"role": "assistant", "content": json.dumps(layout())}, "finish_reason": "stop"}]})
-    factory = httpx.Client
+    factory = httpx.AsyncClient
     class MockClient(factory):
         def __init__(self, **kwargs):
             super().__init__(transport=httpx.MockTransport(respond), **kwargs)
-    monkeypatch.setattr(httpx, "Client", MockClient)
+    monkeypatch.setattr(httpx, "AsyncClient", MockClient)
     stream = io.BytesIO()
     Image.new("RGB", (400, 500), "white").save(stream, format="PNG")
     result = propose_regions(stream.getvalue())

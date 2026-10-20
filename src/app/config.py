@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     vlm_model: str = ""
     vlm_api_key: str = ""
     vlm_timeout_s: float = Field(default=60, gt=0, le=120)
+    zoning_timeout_s: float = Field(default=300, gt=0, le=300)
     daily_vlm_limit: int = Field(default=100, ge=0)
     claim_precheck_enabled: bool = True
     claim_precheck_model: str = "gpt-6.1-sol"
